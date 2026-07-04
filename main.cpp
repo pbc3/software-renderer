@@ -23,7 +23,9 @@ typedef int64_t i64;
 enum class COLOURS : u32 {
 	BLUE = 0x000000FF,
 	GREEN = 0x0000FF00,
-	RED = 0x00FF0000
+	RED = 0x00FF0000,
+	WHITE = 0xFFFFFFFF,
+	SKIN = 0x00F7DCCB
 };
 struct Framebuffer {
 	BITMAPINFO bmInfo;
@@ -63,11 +65,15 @@ struct WindowData {
 		return WindowSize{ winWidth,winHeight };
 	}
 };
-
 struct Triangle {
 	Vector2 v0;
 	Vector2 v1;
 	Vector2 v2;
+};
+struct Transform {
+	Vector4 position;
+	Vector4 scale;
+	Vector4 rotation;
 };
 struct Face { int a, b, c; };
 
@@ -77,10 +83,22 @@ static bool running = true;
 static float focalLength = 2500;
 int centreScreenX, centreScreenY;
 static float scale = -450;
+static u32 winwidth = 1920;
+static u32 winheight = 1080;
 
+
+static  Transform camera{};
+static Matrix4D p;
+static Matrix4D v;
+
+
+Matrix4D MakePerspective();
+Matrix4D MakeViewMatrix();
 void DrawLine(u32 x0, u32 y0, u32 x1, u32 y1);
 inline void render(HWND hwnd);
 void DrawTriangle(Triangle t);
+
+
 
 struct Model {
 	std::vector<Vector3> verts;
@@ -191,22 +209,11 @@ void ClearScreen() {
 
 
 
-static u32 winwidth = 2560;
-static u32 winheight = 1440;
-
-struct Transform {
-	Vector4 position;
-	Vector4 scale;
-	Vector4 rotation;
-};
-static  Transform camera{};
-
-Matrix4D make_perspective();
-Matrix4D MakeViewMatrix();
 
 
-static Matrix4D p = make_perspective();
-static Matrix4D v = MakeViewMatrix();
+
+
+
 LRESULT WndProc(HWND hwnd, UINT MSG, WPARAM wParam, LPARAM lParam) {
 	LRESULT result = 0;
 	switch (MSG) {
@@ -345,7 +352,7 @@ void DrawLine(
 		PutPixel( 
 			(int)std::roundf(x), // must round here, if u round in the acclumulation, it will reset the fractional progress of that tick
 			(int)std::roundf(y),
-			(u32)COLOURS::BLUE
+			(u32)COLOURS::RED
 		);
 
 		x += xInc;
@@ -357,6 +364,7 @@ void DrawLine(
 struct Object {
 	Model* model; // heavy ? use pointer.. can i even copy it... ? will perform a copy on the vec
 	Transform transform;
+	std::vector<Vector4> transformCache;
 };
 
 constexpr float NEAR_PLANE = 1.f;
@@ -415,7 +423,7 @@ Vector4 LocalToWorld(Vector4 v, Transform transform) {
 	return v_world;
 }
 
-Matrix4D make_perspective() {
+Matrix4D MakePerspective() {
 	float fov = degrees_to_radians(45.6);
 	float tanHalfFovy = std::tanf(fov / 2);
 	// f = fov scaling factor. we mul our x and y by this f to either shrink or grow objects depending on the fov(zoom factor)
@@ -440,6 +448,78 @@ Vector2 NDCToScreen(Vector4 v) {
 	float screenX1 = ((v.x + 1.0f) * 0.5f * winwidth);
 	float screenY1 = ((1.0f - v.y) * 0.5f * winheight);
 	return { screenX1, screenY1 };
+}
+void ScanlineRasterize(Vector2 screen0, Vector2 screen1, Vector2 screen2) {
+	// populate a triangle and draw it
+	Triangle tri{ screen0,screen1,screen2 };
+
+	Vector2 v[3] = { screen0,screen1,screen2 };
+	std::sort(v, v + 3, [](const Vector2& a, const Vector2& b) {
+		return a.y < b.y;
+		});
+	auto vtop = v[0];
+	auto vmid = v[1];
+	auto vbot = v[2];
+
+	// edge slopes
+	auto edge1 = (vmid.x - vtop.x) / (vmid.y - vtop.y);
+	auto edge2 = (vmid.x - vbot.x) / (vmid.y - vbot.y);
+	auto edge3 = (vtop.x - vbot.x) / (vtop.y - vbot.y);
+
+	//lerp
+	
+	float t = (vmid.y - vtop.y) / (vbot.y - vtop.y); // find how far down along vtop->vbot the middle/vmid.y lies.
+	Vector2 vsplit; //vsplit = where the middle vertex.y is, the row where the tri changes shape.
+	vsplit.x = vtop.x + t * (vbot.x - vtop.x); // find the matching x based on t
+	vsplit.y = vmid.y; // its on the same row as vmid.y so its the same y
+
+
+	float invL = (vmid.x - vtop.x) / (vmid.y - vtop.y);
+	float invR = (vsplit.x - vtop.x) / (vsplit.y - vtop.y);
+	for (int y = ceil(vtop.y); y < vmid.y; y++) {
+
+		float xL = vtop.x + (y - vtop.y) * invL;
+		float xR = vtop.x + (y - vtop.y) * invR;
+
+		if (xL > xR) std::swap(xL, xR);
+
+		for (int x = (int)xL; x <= (int)xR; x++) {
+			PutPixel(x, y, (u32)COLOURS::WHITE);
+		}
+	}
+
+	invL = (vbot.x - vmid.x) / (vbot.y - vmid.y);
+	invR = (vbot.x - vsplit.x) / (vbot.y - vsplit.y);
+
+	for (int y = ceil(vmid.y); y <= vbot.y; y++) {
+
+		float xL = vmid.x + (y - vmid.y) * invL;
+		float xR = vsplit.x + (y - vmid.y) * invR;
+
+		if (xL > xR) std::swap(xL, xR);
+
+		for (int x = (int)xL; x <= (int)xR; x++) {
+			PutPixel(x, y, (u32)COLOURS::WHITE);
+		}
+	}
+}
+
+void EdgeFunction(Vector2 v0, Vector2 v1, Vector2 v2) {
+	
+	// compute bounding box
+	float xmin = min(v0.x, v1.x, v2.x);
+	float xmax = max(v0.x, v1.x, v2.x);
+	float ymin = min(v0.y, v1.y, v2.y);
+	float ymax = max(v0.y, v1.y, v2.y);
+
+	for (int y = ymin; y <= ymax; y++) {
+		for (int x = xmin; x <= xmax; x++) {
+			Vector2 point{ x,y };
+			if (PointInTriangle(p)) {
+				PutPixel(x, y, (u32)COLOURS::WHITE));
+			}
+		}
+	}
 }
 
 void RenderModels(std::vector<Object>& models) {
@@ -482,14 +562,17 @@ void RenderModels(std::vector<Object>& models) {
 				auto screen0 = NDCToScreen(v0clip);
 				auto screen1 = NDCToScreen(v1clip);
 				auto screen2 = NDCToScreen(v2clip);
+																
+				ScanlineRasterize(screen0, screen1, screen2);
+				
 
-				// populate a triangle and draw it
-				Triangle tri{ screen0,screen1,screen2 };
-				DrawTriangle(tri);
+
+				//DrawTriangle(tri);
 			}
 		}
 	}
 }
+
 
 
 
@@ -549,7 +632,7 @@ inline void render(HWND hwnd) {
 int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine, int CmdShow) {
 
 
-	Model model("suitcase.obj");
+	Model model("Mutsuki.obj");
 	//Model model2b("2B.obj");
 
 	Object object;
@@ -580,9 +663,9 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 	camera.position = Vector4{ 0,1,3,1 };
 	camera.rotation = Vector4{ 0,0,0,0 };
 
-	
-	v = MakeViewMatrix();
 
+	v = MakeViewMatrix();
+	p = MakePerspective();
 
 
 	WNDCLASSEX windowclass{};
@@ -593,7 +676,7 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 	windowclass.cbSize = sizeof(WNDCLASSEX);
 	HRESULT windowResult = RegisterClassEx(&windowclass);
 	if (!windowResult) { OutputDebugStringA("Failed to register window class"); return 0; }
-	HWND hwnd = CreateWindowExW(0, windowclass.lpszClassName, L"Noelle CPU Renderer",
+	HWND hwnd = CreateWindowExW(0, windowclass.lpszClassName, L"Software Rasterizier",
 		WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, winwidth, winheight, 0, 0, Instance, 0);
 
 	//Show & Update Window
@@ -650,7 +733,7 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 
 		
 		sprintf_s(buffer, 256, "FPS : %.3f  \n Mega Cycles taken for this frame: %d \n ", FPS, totalCycles / (1000 * 1000));
-		//OutputDebugStringA(buffer);
+		OutputDebugStringA(buffer);
 
 		lastCycleCount = endCycleCount;
 		lastCounter = endCounter;

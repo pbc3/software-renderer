@@ -328,7 +328,7 @@ struct Vector4 {
 		float data[4];
 	};
 	constexpr Vector4(float x, float y, float z, float w) : x(x), y(y), z(z), w(w) {};
-	constexpr Vector4(float x) : x(x), y(x), z(x), w(x) {};
+	constexpr Vector4(float x) : x(x), y(x), z(x), w(1) {};
 	constexpr Vector4() : Vector4(0.f) {};
 	constexpr Vector4(Vector3& v, float w) : x(v.x), y(v.y), z(v.z), w(w) {};
 	constexpr Vector4(Vector3& v) : x(v.x), y(v.y), z(v.z), w(1) {};
@@ -503,6 +503,8 @@ struct Matrix4D {
 		);
 	}
 
+
+	
 	static Matrix4D Rx(float degrees) {
 		float radians = degrees_to_radians(degrees);
 		Vector4 col1 = { 1,0,0,0 };
@@ -510,13 +512,6 @@ struct Matrix4D {
 		Vector4 col3 = { 0,-sinf(radians),cosf(radians),0 };
 		Vector4 col4 = { 0,0,0,1 };
 		Matrix4D rotX(col1, col2, col3, col4);
-		for (int i = 0; i < 4; i++) {
-			for (int j = 0; j < 4; j++) {
-				if (IsNearlyZero(rotX(i, j))) {
-					rotX(i, j) = 0;
-				}
-			}
-		}
 		return rotX;
 	}
 	static Matrix4D Ry(float degrees) {
@@ -526,13 +521,6 @@ struct Matrix4D {
 		Vector4 col3 = { sinf(radians),0,cosf(radians),0 };
 		Vector4 col4 = { 0,0,0,1 };
 		Matrix4D rotY(col1, col2, col3, col4);
-		for (int i = 0; i < 4; i++) {
-			for (int j = 0; j < 4; j++) {
-				if (IsNearlyZero(rotY(i, j))) {
-					rotY(i, j) = 0;
-				}
-			}
-		}
 		return rotY;
 	}
 	static Matrix4D Rz(float degrees) {
@@ -551,6 +539,9 @@ struct Matrix4D {
 		}
 		return rotZ;
 	}
+
+	inline static Matrix4D Rotation(Vector3 euler);
+
 
 	static Matrix4D identity() {
 		Matrix4D n({0,0,0,0});
@@ -617,6 +608,11 @@ inline Matrix4D operator*(const Matrix4D& lhs, const Matrix4D& rhs)
 		lhs(3, 0) * rhs(0, 2) + lhs(3, 1) * rhs(1, 2) + lhs(3, 2) * rhs(2, 2) + lhs(3, 3) * rhs(3, 2),
 		lhs(3, 0) * rhs(0, 3) + lhs(3, 1) * rhs(1, 3) + lhs(3, 2) * rhs(2, 3) + lhs(3, 3) * rhs(3, 3)
 	);
+}
+
+inline Matrix4D Matrix4D::Rotation(Vector3 euler)
+{
+	return Matrix4D::Rz(euler.z) * Matrix4D::Ry(euler.y) * Matrix4D::Rx(euler.x);
 }
 
 [[nodiscard]] inline float angle_between_acos(const Vector3& lhs, const Vector3& rhs)
