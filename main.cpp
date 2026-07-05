@@ -297,7 +297,7 @@ LRESULT WndProc(HWND hwnd, UINT MSG, WPARAM wParam, LPARAM lParam) {
 			ResizeBitmap(buffer, winSize.windowWidth, winSize.windowHeight);
 			centreScreenX = winSize.windowWidth / 2;
 			centreScreenY = winSize.windowHeight / 2;
-			v = MakeViewMatrix();
+			//v = MakeViewMatrix();
 			p = MakePerspective();
 		}
 		DisplayBitmapInWindow(winData, buffer);
@@ -431,7 +431,7 @@ Matrix4D MakePerspective() {
 	// f = fov scaling factor. we mul our x and y by this f to either shrink or grow objects depending on the fov(zoom factor)
 	float f = 1 / tanHalfFovy;
 	float& d = f;
-	float ar = (float)winheight / (float)winwidth;
+	float ar = (float)buffer.height / (float)buffer.width;
 	float zNear = 1.0f;
 	float zFar = 10.f;
 	float zRange = zNear - zFar;
@@ -447,8 +447,8 @@ Matrix4D MakePerspective() {
 	return projection;
 }
 Vector2 NDCToScreen(Vector4 v) {
-	float screenX1 = ((v.x + 1.0f) * 0.5f * winwidth);
-	float screenY1 = ((1.0f - v.y) * 0.5f * winheight);
+	float screenX1 = ((v.x + 1.0f) * 0.5f * buffer.width);
+	float screenY1 = ((1.0f - v.y) * 0.5f * buffer.height);
 	return { screenX1, screenY1 };
 }
 void ScanlineRasterize(Vector2 screen0, Vector2 screen1, Vector2 screen2) {
