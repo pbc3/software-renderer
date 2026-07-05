@@ -83,8 +83,8 @@ static bool running = true;
 static float focalLength = 2500;
 int centreScreenX, centreScreenY;
 static float scale = -450;
-static u32 winwidth = 1920;
-static u32 winheight = 1080;
+static u32 winwidth = 128;
+static u32 winheight = 128;
 
 
 static  Transform camera{};
@@ -297,13 +297,15 @@ LRESULT WndProc(HWND hwnd, UINT MSG, WPARAM wParam, LPARAM lParam) {
 			ResizeBitmap(buffer, winSize.windowWidth, winSize.windowHeight);
 			centreScreenX = winSize.windowWidth / 2;
 			centreScreenY = winSize.windowHeight / 2;
+			v = MakeViewMatrix();
+			p = MakePerspective();
 		}
 		DisplayBitmapInWindow(winData, buffer);
 		EndPaint(hwnd, &paint);
 	}break;
 	default: {
 		//OutputDebugStringA("DefWindProc");
-		result = DefWindowProc(hwnd, MSG, wParam, lParam);
+		result = DefWindowProc(hwnd, MSG, wParam, lParam); // h
 	}
 	}
 	return result;
@@ -504,23 +506,28 @@ void ScanlineRasterize(Vector2 screen0, Vector2 screen1, Vector2 screen2) {
 	}
 }
 
-void EdgeFunction(Vector2 v0, Vector2 v1, Vector2 v2) {
-	
-	// compute bounding box
-	float xmin = min(v0.x, v1.x, v2.x);
-	float xmax = max(v0.x, v1.x, v2.x);
-	float ymin = min(v0.y, v1.y, v2.y);
-	float ymax = max(v0.y, v1.y, v2.y);
 
-	for (int y = ymin; y <= ymax; y++) {
-		for (int x = xmin; x <= xmax; x++) {
-			Vector2 point{ x,y };
-			if (PointInTriangle(p)) {
-				PutPixel(x, y, (u32)COLOURS::WHITE));
-			}
-		}
-	}
-}
+//bool PointInTriangle(Vector2 p) {
+//	
+//	return false;
+//}
+//void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2) {
+//	
+//	// compute bounding box
+//	float xmin = min(v0.x, v1.x, v2.x);
+//	float xmax = max(v0.x, v1.x, v2.x);
+//	float ymin = min(v0.y, v1.y, v2.y);
+//	float ymax = max(v0.y, v1.y, v2.y);
+//
+//	for (int y = ymin; y <= ymax; y++) {
+//		for (int x = xmin; x <= xmax; x++) {
+//			Vector2 point{ x,y };
+//			if (PointInTriangle(p)) {
+//				PutPixel(x, y, (u32)COLOURS::WHITE));
+//			}
+//		}
+//	}
+//}
 
 void RenderModels(std::vector<Object>& models) {
 
@@ -564,7 +571,7 @@ void RenderModels(std::vector<Object>& models) {
 				auto screen2 = NDCToScreen(v2clip);
 																
 				ScanlineRasterize(screen0, screen1, screen2);
-				
+				//EdgeFunctionRasterize(screen0, screen1, screen2);
 
 
 				//DrawTriangle(tri);
