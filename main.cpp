@@ -2,7 +2,7 @@
 //+ Y = up
 //- Z = forward
 
-
+#define NOMINMAX
 #define _CRT_SECURE_NO_WARNINGS
 #include "math.h"
 #include <Windows.h>
@@ -83,8 +83,8 @@ static bool running = true;
 static float focalLength = 2500;
 int centreScreenX, centreScreenY;
 static float scale = -450;
-static u32 winwidth = 128;
-static u32 winheight = 128;
+static u32 winwidth = 1920;
+static u32 winheight = 1080;
 
 
 static  Transform camera{};
@@ -201,7 +201,7 @@ void FramebufferRenderColour(u32 color) {
 			pixels[(y * buffer.width) + x] = color; // green
 		}
 	}
-}	
+}
 
 void ClearScreen() {
 	FramebufferRenderColour(0x00000000);
@@ -239,7 +239,7 @@ LRESULT WndProc(HWND hwnd, UINT MSG, WPARAM wParam, LPARAM lParam) {
 		bool WasDown = ((lParam & (1 << 30)) != 0); // if true - this is a auto-repeat (key held down) stroke, false = initial stroke
 		bool IsDown = ((lParam & (1 << 31)) == 0); // check current state of the key - true = currently being pressed false = not being pressed
 		if (VKCode == 'R') {
-			camera.rotation.z += 1;
+			camera.rotation.y += 1;
 			v = MakeViewMatrix();
 		}
 		if (VKCode == 'O') {
@@ -267,13 +267,13 @@ LRESULT WndProc(HWND hwnd, UINT MSG, WPARAM wParam, LPARAM lParam) {
 			v = MakeViewMatrix();
 		}
 	}break;
-	//case WM_SIZE: {
-	//	// just handle resize in the render function, by computing a new size each tick idc
-	//	//WindowData windowData(hwnd);
-	//	//ResizeDIBSection(GlobalBackBuffer, windowData.windowSize.windowWidth,windowData.windowSize.windowHeight);
-	//	//OutputDebugStringA("WM_SIZE\n");
-	//	//RenderGradient(&GlobalBackBuffer,**var, **(var + 1));
-	//}break;
+				   //case WM_SIZE: {
+				   //	// just handle resize in the render function, by computing a new size each tick idc
+				   //	//WindowData windowData(hwnd);
+				   //	//ResizeDIBSection(GlobalBackBuffer, windowData.windowSize.windowWidth,windowData.windowSize.windowHeight);
+				   //	//OutputDebugStringA("WM_SIZE\n");
+				   //	//RenderGradient(&GlobalBackBuffer,**var, **(var + 1));
+				   //}break;
 	case WM_DESTROY: {
 		running = false;
 	}break;
@@ -329,7 +329,7 @@ void DrawLine(
 
 	// get the max steps - to ensure we dont skip a pixel, we get the maximum amount of movements we need to do
 	float steps =
-		max( 
+		std::max(
 			abs(dx),
 			abs(dy)
 		);
@@ -351,7 +351,7 @@ void DrawLine(
 		i++
 		)
 	{
-		PutPixel( 
+		PutPixel(
 			(int)std::roundf(x), // must round here, if u round in the acclumulation, it will reset the fractional progress of that tick
 			(int)std::roundf(y),
 			(u32)COLOURS::RED
@@ -406,7 +406,7 @@ Matrix4D MakeModelMatrix(Transform transform) {
 	return world;
 }
 Vector4 LocalToWorld(Vector4 v, Transform transform) {
-	Matrix4D local(RIGHT,UP,FORWARD,{0,0,0,1});
+	Matrix4D local(RIGHT, UP, FORWARD, { 0,0,0,1 });
 	Matrix4D scale(transform.scale);
 	Matrix4D translate( // set translation offset to last column
 		Vector4{ 1,0,0,0 },
@@ -469,7 +469,7 @@ void ScanlineRasterize(Vector2 screen0, Vector2 screen1, Vector2 screen2) {
 	auto edge3 = (vtop.x - vbot.x) / (vtop.y - vbot.y);
 
 	//lerp
-	
+
 	float t = (vmid.y - vtop.y) / (vbot.y - vtop.y); // find how far down along vtop->vbot the middle/vmid.y lies.
 	Vector2 vsplit; //vsplit = where the middle vertex.y is, the row where the tri changes shape.
 	vsplit.x = vtop.x + t * (vbot.x - vtop.x); // find the matching x based on t
@@ -478,15 +478,15 @@ void ScanlineRasterize(Vector2 screen0, Vector2 screen1, Vector2 screen2) {
 
 	float invL = (vmid.x - vtop.x) / (vmid.y - vtop.y);
 	float invR = (vsplit.x - vtop.x) / (vsplit.y - vtop.y);
-	for (int y = ceil(vtop.y); y < vmid.y; y++) {
+	for (int y = ceilf(vtop.y); y <= vmid.y; y++) {
 
 		float xL = vtop.x + (y - vtop.y) * invL;
 		float xR = vtop.x + (y - vtop.y) * invR;
 
 		if (xL > xR) std::swap(xL, xR);
 
-		for (int x = (int)xL; x <= (int)xR; x++) {
-			PutPixel(x, y, (u32)COLOURS::WHITE);
+		for (int x = (int)ceilf(xL); x < (int)ceilf(xR)-1; x++) {
+			PutPixel(x, y, (u32)COLOURS::SKIN);
 		}
 	}
 
@@ -500,34 +500,165 @@ void ScanlineRasterize(Vector2 screen0, Vector2 screen1, Vector2 screen2) {
 
 		if (xL > xR) std::swap(xL, xR);
 
-		for (int x = (int)xL; x <= (int)xR; x++) {
-			PutPixel(x, y, (u32)COLOURS::WHITE);
+		for (int x = (int)ceilf(xL); x < (int)ceilf(xR) -1; x++) {
+			PutPixel(x, y, (u32)COLOURS::SKIN);
 		}
 	}
 }
 
 
-//bool PointInTriangle(Vector2 p) {
-//	
-//	return false;
-//}
-//void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2) {
-//	
-//	// compute bounding box
-//	float xmin = min(v0.x, v1.x, v2.x);
-//	float xmax = max(v0.x, v1.x, v2.x);
-//	float ymin = min(v0.y, v1.y, v2.y);
-//	float ymax = max(v0.y, v1.y, v2.y);
-//
-//	for (int y = ymin; y <= ymax; y++) {
-//		for (int x = xmin; x <= xmax; x++) {
-//			Vector2 point{ x,y };
-//			if (PointInTriangle(p)) {
-//				PutPixel(x, y, (u32)COLOURS::WHITE));
-//			}
-//		}
-//	}
-//}
+bool PointInTriangle(Vector2 p, Vector2 tri[3])
+{
+	Vector2 edgeA = tri[1] - tri[0]; // A->B (B-A = A->B)
+	Vector2 edgeB = tri[2] - tri[1]; // B ->C
+	Vector2 edgeC = tri[0] - tri[2]; // C -> A - WRAPS
+
+	Vector2 ap = p - tri[0];
+	Vector2 bp = p - tri[1];
+	Vector2 cp = p - tri[2];
+
+	float crossA = edgeA.x * ap.y - edgeA.y * ap.x;
+	float crossB = edgeB.x * bp.y - edgeB.y * bp.x;
+	float crossC = edgeC.x * cp.y - edgeC.y * cp.x;
+
+
+	bool hasNeg = (crossA < 0) || (crossB < 0) || (crossC < 0);
+	bool hasPos = (crossA > 0) || (crossB > 0) || (crossC > 0);
+
+	return !(hasNeg && hasPos);
+}
+
+
+
+
+inline float Cross2D(const Vector2& lhs, const Vector2& rhs) {
+	return lhs.x * rhs.y - lhs.y * rhs.x;
+}
+bool IsTopLeft(Vector2 edge) {
+	bool goesUp = edge.y < 0.0f;
+	bool isHorizontalTop = edge.y == 0.0f && edge.x > 0.0f;
+	return goesUp || isHorizontalTop;
+}
+bool EdgeCheck(float edgeValue, bool isTopLeft) {
+	return edgeValue > 0.0f || (edgeValue == 0.0f && isTopLeft);
+}
+bool PointInTriangle(Vector2 p, Triangle tri) {
+	// area gives winding info. positive = CCW, 0 = degen, negative = CW
+	//float area = Cross2D(tri.v1 - tri.v0, tri.v2 - tri.v0);
+
+	//// degenrate tris
+	//if (area == 0.0f) {
+	//	return false;
+	//}
+	//// normalise winding to force CCW
+	//if (area < 0.0f) {
+	//	std::swap(tri.v1, tri.v2);
+	//}
+
+	// make edge vectors for positive/CCW winding
+	// a -> b (b - a)
+	Vector2 abEdge = tri.v1 - tri.v0;
+
+	// b - > c(c- b)
+	Vector2 bcEdge = tri.v2 - tri.v1;
+
+	// c - > a (a - c)
+	Vector2 caEdge = tri.v0 - tri.v2;
+
+
+	// Top Left Rule - a pixel is considered in a triangle if it lies on a left edge, or a flat top edge.
+
+
+	// make vectors pointing from edge tail(start) to point p
+
+	Vector2 abToP = p - tri.v0;
+	Vector2 bcToP = p - tri.v1;
+	Vector2 caToP = p - tri.v2;
+
+
+	// compute cross of each
+
+
+	float crossAB = Cross2D(abEdge, abToP);
+	float crossBC = Cross2D(bcEdge, bcToP);
+	float crossCA = Cross2D(caEdge, caToP);
+
+
+
+
+	// CCW triangle: inside is left of every edge.
+	return EdgeCheck(crossAB, IsTopLeft(abEdge)) &&
+		EdgeCheck(crossBC, IsTopLeft(bcEdge)) &&
+		EdgeCheck(crossCA, IsTopLeft(caEdge));
+
+}
+
+
+void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2) {
+
+	Triangle tri = { v0,v1,v2 };
+
+
+
+	auto [trixmin, trixmax] = std::minmax({ v0.x,v1.x,v2.x });
+	auto [triymin, triymax] = std::minmax({ v0.y,v1.y,v2.y });
+	if (trixmax < 0 || trixmin >= buffer.width ||
+		triymax < 0 || triymin >= buffer.height)
+	{
+		return;
+	}
+
+	auto xmin = std::clamp((int)floor(trixmin), 0, buffer.width - 1);
+	auto xmax = std::clamp((int)ceil(trixmax), 0, buffer.width - 1);
+	auto ymin = std::clamp((int)floor(triymin), 0, buffer.height - 1);
+	auto ymax = std::clamp((int)ceil(triymax), 0, buffer.height - 1);
+		
+	
+
+	float area = Cross2D(tri.v1 - tri.v0, tri.v2 - tri.v0);
+
+	// degenrate tris
+	if (area == 0.0f) {
+		return;
+	}
+	// normalise winding to force CCW
+	if (area < 0.0f) {
+		std::swap(tri.v1, tri.v2);
+	}
+
+	Vector2 abEdge = tri.v1 - tri.v0;
+	// b - > c(c- b)
+	Vector2 bcEdge = tri.v2 - tri.v1;
+	// c - > a (a - c)
+	Vector2 caEdge = tri.v0 - tri.v2;
+
+
+	bool abFlag = IsTopLeft(abEdge);
+	bool bcFlag = IsTopLeft(bcEdge);
+	bool caFlag = IsTopLeft(caEdge);
+
+	for (int y = floorf(ymin); y <= ceilf(ymax); y++) {
+		for (int x = floorf(xmin); x <= ceilf(xmax); x++) {
+
+			Vector2 p{ (float)x + 0.5f, (float)y + 0.5f };
+			Vector2 abToP = p - tri.v0;
+			Vector2 bcToP = p - tri.v1;
+			Vector2 caToP = p - tri.v2;
+
+			// compute cross of each
+			float crossAB = Cross2D(abEdge, abToP);
+			float crossBC = Cross2D(bcEdge, bcToP);
+			float crossCA = Cross2D(caEdge, caToP);
+
+			if (EdgeCheck(crossAB, abFlag) &&
+				EdgeCheck(crossBC, bcFlag) &&
+				EdgeCheck(crossCA, caFlag)) {
+				PutPixel(x, y, (u32)COLOURS::WHITE);
+			}
+			
+		}
+	}
+}
 
 void RenderModels(std::vector<Object>& models) {
 
@@ -537,18 +668,22 @@ void RenderModels(std::vector<Object>& models) {
 		Matrix4D model = MakeModelMatrix(transform);
 		Matrix4D MVP = p * v * model;
 		Matrix4D MV = v * model;
+		float xmin= FLT_MAX;
+		float ymin= FLT_MAX;
+		float xmax= -FLT_MAX;
+		float ymax= -FLT_MAX;
 		for (const auto& face : faces) {
 
-			Vector4 v0{m.model->verts[face.a],1}; // THESE ARE IN LOCAL SPACE
-			Vector4 v1{m.model->verts[face.b],1};
-			Vector4 v2{m.model->verts[face.c],1};
-		
-			
+			Vector4 v0{ m.model->verts[face.a],1 }; // THESE ARE IN LOCAL SPACE
+			Vector4 v1{ m.model->verts[face.b],1 };
+			Vector4 v2{ m.model->verts[face.c],1 };
+
+
 
 			auto v0world = model * v0;
 			auto v1world = model * v1;
 			auto v2world = model * v2;
-			
+
 			auto v0view = v * v0world;
 			auto v1view = v * v1world;
 			auto v2view = v * v2world;
@@ -569,14 +704,38 @@ void RenderModels(std::vector<Object>& models) {
 				auto screen0 = NDCToScreen(v0clip);
 				auto screen1 = NDCToScreen(v1clip);
 				auto screen2 = NDCToScreen(v2clip);
-																
-				ScanlineRasterize(screen0, screen1, screen2);
-				//EdgeFunctionRasterize(screen0, screen1, screen2);
+
+				//ScanlineRasterize(screen0, screen1, screen2);
+				EdgeFunctionRasterize(screen0, screen1, screen2);
 
 
 				//DrawTriangle(tri);
-			}
+		
+				xmin = std::min({ xmin, screen0.x, screen1.x, screen2.x });
+				xmax = std::max({ xmax, screen0.x, screen1.x, screen2.x });
+
+				ymin = std::min({ ymin, screen0.y, screen1.y, screen2.y });
+				ymax = std::max({ ymax, screen0.y, screen1.y, screen2.y });
 		}
+		}
+
+		//// debug box
+		//int left = (int)floorf(xmin);
+		//int right = (int)ceilf(xmax);
+		//int top = (int)floorf(ymin);
+		//int bottom = (int)ceilf(ymax);
+
+		//for (int x = left; x <= right; x++)
+		//{
+		//	PutPixel(x, top, (u32)COLOURS::RED);
+		//	PutPixel(x, bottom, (u32)COLOURS::RED);
+		//}
+
+		//for (int y = top; y <= bottom; y++)
+		//{
+		//	PutPixel(left, y, (u32)COLOURS::RED);
+		//	PutPixel(right, y, (u32)COLOURS::RED);
+		//}
 	}
 }
 
@@ -589,36 +748,36 @@ void DrawTriangle(Triangle t) {
 		return;
 	}
 	DrawLine(
-		(i32) t.v0.x,
-		(i32) t.v0.y,
-		(i32) t.v1.x,
-		(i32) t.v1.y
+		(i32)t.v0.x,
+		(i32)t.v0.y,
+		(i32)t.v1.x,
+		(i32)t.v1.y
 	);
 
 	DrawLine(
-		(i32) t.v1.x,
-		(i32) t.v1.y,
-		(i32) t.v2.x,
-		(i32) t.v2.y
+		(i32)t.v1.x,
+		(i32)t.v1.y,
+		(i32)t.v2.x,
+		(i32)t.v2.y
 	);
 
 	DrawLine(
-		(i32) t.v2.x,
-		(i32) t.v2.y,
-		(i32) t.v0.x,
-		(i32) t.v0.y
+		(i32)t.v2.x,
+		(i32)t.v2.y,
+		(i32)t.v0.x,
+		(i32)t.v0.y
 	);
 }
 
 void PutPixel(i32 x, i32 y, u32 color)
 {
-	if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height){
+	if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) {
 		//OutputDebugStringA("OUT OF BOUNDS");
-	return;
-}
+		return;
+	}
 
 	u32* pixels = (u32*)buffer.memory;
-	pixels[y * buffer.width + x] = color; 
+	pixels[y * buffer.width + x] = color;
 }
 
 
@@ -630,7 +789,7 @@ inline void render(HWND hwnd) {
 		centreScreenX = frameWinData.windowSize.windowWidth / 2;
 		centreScreenY = frameWinData.windowSize.windowHeight / 2;
 
-		
+
 	}
 	DisplayBitmapInWindow(frameWinData, buffer);
 }
@@ -696,7 +855,7 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 
 	WindowData winData(hwnd);
 	ResizeBitmap(buffer, winwidth, winheight);
-	
+
 
 	i64 lastCycleCount = __rdtsc();
 	LARGE_INTEGER frequency;
@@ -706,6 +865,14 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 	MSG msg{};
 
 
+
+	Vector2 v0 = { 400,400 };
+	Vector2 v1 = { 800,400 };
+	Vector2 v2 = { 400,800 };
+	Vector2 v3 = { 900,900 };
+	Vector2 v4 = { 750,200 };
+
+	
 
 	while (running) {
 		//Timer timer;
@@ -718,17 +885,29 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 			DispatchMessageW(&msg);
 		}
 		// rotate object around
-		//objects[0].transform.rotation.y += 0.1;
+		objects[0].transform.rotation.y += 0.1;
 
 		ClearScreen();
 		RenderModels(objects);
+		//EdgeFunctionRasterize(v0, v1, v2,COLOURS::RED);
+		//EdgeFunctionRasterize(v3, v2, v1, COLOURS::SKIN);
+		//EdgeFunctionRasterize(v4, v1, v0, COLOURS::WHITE);
 		render(hwnd);
 
+
+		/*
+		* 
+			HandleInput(scene.camera)
+			Update(scene.camera)
+			update func maybe just loops through a list of objects to update, switches on camera and handles it..?
+			renderer.render(scene)
+
+		*/
 
 		// perf
 		LARGE_INTEGER endCounter;
 		QueryPerformanceCounter(&endCounter);
-		
+
 		i64 endCycleCount = __rdtsc();
 		i64 totalCycles = endCycleCount - lastCycleCount;
 
@@ -738,7 +917,7 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 		char buffer[256];
 
 
-		
+
 		sprintf_s(buffer, 256, "FPS : %.3f  \n Mega Cycles taken for this frame: %d \n ", FPS, totalCycles / (1000 * 1000));
 		OutputDebugStringA(buffer);
 
@@ -748,3 +927,63 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 }
 
 
+//struct Camera {
+//	Transform transform;
+//	Matrix4D v;
+//	Matrix4D p;
+//	float fovDeg;
+//
+//
+//
+//};
+//struct Scene {
+//	std::vector<Object> objects;
+//	Camera camera;
+//};
+//static Scene scene;
+//Camera camera;
+//Transform camTrans;
+//camTrans.rotation = { 0,0,0,0 };
+//camTrans.position = { 0,0,5,0 };
+//camera.v = MakeViewMatrix();
+//camera.fovDeg = 45;
+//camera.p = MakePerspective(camera.fovDeg);
+//struct Renderer {
+//
+//	Framebuffer buffer;
+//
+//
+//	void Render(HWND hwnd, Scene& scene) {
+//		ClearScreen();
+//		RenderModels(scene.objects);
+//		render(hwnd);
+//	}
+//
+//	void Resize(HWND hwnd) {
+//		WindowData frameWinData(hwnd);
+//		if (frameWinData.windowSize.windowWidth != buffer.width ||
+//			frameWinData.windowSize.windowHeight != buffer.height) {
+//			ResizeBitmap(buffer, frameWinData.windowSize.windowWidth, frameWinData.windowSize.windowHeight);
+//			centreScreenX = frameWinData.windowSize.windowWidth / 2;
+//			centreScreenY = frameWinData.windowSize.windowHeight / 2;
+//		}
+//	}
+//
+//
+//};
+/*
+OK lets try again.
+
+aim for now, singleton Scene instance, so i can access the matrices in my current pipeline
+this can change
+so instantiate in global, populate in main
+
+
+
+I want
+Camera { p, v, fov }
+Scene{
+models,camera
+}
+Renderer{buffer, resize,  render functions}
+*/
