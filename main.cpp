@@ -2,23 +2,26 @@
 //+ Y = up
 //- Z = forward
 
-#define NOMINMAX
+#define NOMINMAX // GO AWAY WINDOWS
 #define _CRT_SECURE_NO_WARNINGS
+#define WIN32_LEAN_AND_MEAN
+
+
 #include "math.h"
 #include <Windows.h>
 #include <cstdint>
 #include <iostream>
 
-typedef uint8_t u8;
-typedef uint16_t u16;
-typedef uint32_t u32;
-typedef uint64_t u64;
 
-typedef int8_t i8;
-typedef int16_t i16;
-typedef int32_t i32;
-typedef int64_t i64;
+using u8 = uint8_t;
+using u16 = uint16_t;
+using u32 = uint32_t;
+using u64 = uint64_t;
 
+using i8 = int8_t;
+using i16 = int16_t;
+using i32 = int32_t;
+using i64 = int64_t;
 
 enum class COLOURS : u32 {
 	BLUE = 0x000000FF,
@@ -33,6 +36,7 @@ struct Framebuffer {
 	i32 height;
 	i32 pitch;
 	void* memory;
+	void* depth;
 };
 
 struct WindowSize {
@@ -46,6 +50,7 @@ struct WindowData {
 	RECT windowRect;
 	WindowSize windowSize;
 
+	
 	WindowData(HWND _hwnd) {
 		hwnd = _hwnd;
 		deviceContext = GetDC(hwnd);
@@ -83,8 +88,8 @@ static bool running = true;
 static float focalLength = 2500;
 int centreScreenX, centreScreenY;
 static float scale = -450;
-static u32 winwidth = 1920;
-static u32 winheight = 1080;
+static u32 winwidth = 1280;
+static u32 winheight = 720;
 
 
 static  Transform camera{};
@@ -104,6 +109,8 @@ struct Model {
 	std::vector<Vector3> verts;
 	std::vector<Face> faces;
 
+
+	Model(std::vector<Vector3> verts, std::vector<Face> faces) : verts(verts), faces(faces) {};
 
 	Model(const std::string& filename) {
 
@@ -165,6 +172,7 @@ void ResizeBitmap(Framebuffer& buffer, u32 width, i32 height) {
 	if (buffer.memory) {
 		// if we have memory.. free it because ? : we want a new amount of memory to the new size
 		VirtualFree(buffer.memory, 0, MEM_RELEASE);
+		VirtualFree(buffer.depth, 0, MEM_RELEASE);
 	}
 	buffer.width = width;
 	buffer.height = height;
@@ -179,8 +187,16 @@ void ResizeBitmap(Framebuffer& buffer, u32 width, i32 height) {
 
 	u32 bytesPerPixel = 4;
 	u32 size = width * height * bytesPerPixel;
+	u32 depthSize = width * height * sizeof(float);
 
 	buffer.memory = VirtualAlloc(nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	buffer.depth = VirtualAlloc(nullptr, depthSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	float* db = (float*)buffer.depth;
+	//for (int i = 0; i < buffer.width * buffer.height; i++) {
+	//	db[i] = FLT_MAX;
+	//	
+	//}
+	std::fill(db, db + buffer.width * buffer.height, FLT_MAX);
 	buffer.pitch = width * bytesPerPixel; // how long is a row?
 }
 
@@ -199,14 +215,17 @@ void FramebufferRenderColour(u32 color) {
 	for (u32 y = 0; y < buffer.height; y++) {
 		for (u32 x = 0; x < buffer.width; x++) {
 			pixels[(y * buffer.width) + x] = color; // green
+			//PutPixel(x, y, 0x0);
 		}
 	}
 }
 
-void ClearScreen() {
+void ClearFrameData() {
+	float* db = (float*)buffer.depth;
+	std::fill(db, db + buffer.width * buffer.height, FLT_MAX);
 	FramebufferRenderColour(0x00000000);
 }
-
+	
 
 
 
@@ -540,7 +559,7 @@ bool IsTopLeft(Vector2 edge) {
 	return goesUp || isHorizontalTop;
 }
 bool EdgeCheck(float edgeValue, bool isTopLeft) {
-	return edgeValue > 0.0f || (edgeValue == 0.0f && isTopLeft);
+	return edgeValue > 0.0f || (IsNearlyZero(edgeValue) && isTopLeft);
 }
 bool PointInTriangle(Vector2 p, Triangle tri) {
 	// area gives winding info. positive = CCW, 0 = degen, negative = CW
@@ -593,21 +612,33 @@ bool PointInTriangle(Vector2 p, Triangle tri) {
 
 }
 
+#include <format> 
+struct Colour {
+	u8 r;
+	u8 g;
+	u8 b;
+};
 
-void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2) {
+Colour colours[3] = { {0xFF,0x00,0x00},{0x00,0xFF,0x00},{0x00,0x00,0xFF} };
+
+static float oldcrossAB;
+int tick = 0;
+void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2, float depth[3]) {
 
 	Triangle tri = { v0,v1,v2 };
 
-
-
+	// compute bounding box
 	auto [trixmin, trixmax] = std::minmax({ v0.x,v1.x,v2.x });
 	auto [triymin, triymax] = std::minmax({ v0.y,v1.y,v2.y });
+
+	// inital rejection if off screen.. i think it has been culled by here anyway..
 	if (trixmax < 0 || trixmin >= buffer.width ||
 		triymax < 0 || triymin >= buffer.height)
 	{
 		return;
 	}
-
+	
+	// clamp to screen dimensions
 	auto xmin = std::clamp((int)floor(trixmin), 0, buffer.width - 1);
 	auto xmax = std::clamp((int)ceil(trixmax), 0, buffer.width - 1);
 	auto ymin = std::clamp((int)floor(triymin), 0, buffer.height - 1);
@@ -615,54 +646,137 @@ void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2) {
 		
 	
 
+	// 2D cross of a tri = 2xSignedArea of tri, so it can tell you about the triangle
+	// > 0, its a CCW tri, == 0 its a degen tri, < 0 its CW
 	float area = Cross2D(tri.v1 - tri.v0, tri.v2 - tri.v0);
 
 	// degenrate tris
-	if (area == 0.0f) {
+	if (IsNearlyZero(area)) {
 		return;
 	}
+
 	// normalise winding to force CCW
 	if (area < 0.0f) {
 		std::swap(tri.v1, tri.v2);
+		std::swap(depth[1], depth[2]);
+		area = Cross2D(tri.v1 - tri.v0, tri.v2 - tri.v0); //recompute area
 	}
 
-	Vector2 abEdge = tri.v1 - tri.v0;
+	// a - > b (b-a)
+	Vector2 abEdge = tri.v1 - tri.v0; 
 	// b - > c(c- b)
-	Vector2 bcEdge = tri.v2 - tri.v1;
+	Vector2 bcEdge = tri.v2 - tri.v1; 
 	// c - > a (a - c)
-	Vector2 caEdge = tri.v0 - tri.v2;
+	Vector2 caEdge = tri.v0 - tri.v2; 
 
+
+	// w0 = bcEdge
+	float deltaBcCol = tri.v1.y - tri.v2.y;  // -(c.y - b.y)
+	float deltaBcRow = tri.v2.x - tri.v1.x;  //  c.x - b.x
+
+	// w1 = caEdge
+	float deltaCaCol = tri.v2.y - tri.v0.y;  // -(a.y - c.y)
+	float deltaCaRow = tri.v0.x - tri.v2.x;  //  a.x - c.x
+
+	// w2 = abEdge
+	float deltaAbCol = tri.v0.y - tri.v1.y;  // -(b.y - a.y)
+	float deltaAbRow = tri.v1.x - tri.v0.x;  //  b.x - a.x
+
+	// if covered pixel is tiny toss it... idk about this, zoom out = less pixels..looks weird
+	//if (area < 1.0f) {
+	//	return;
+	//}
+
+	Vector2 point0 = { float(xmin + 0.5f), float(ymin + 0.5f) };
+
+	float abCrossRow0 = Cross2D(abEdge, point0 - tri.v0);
+	float bcCrossRow0 = Cross2D(bcEdge, point0 - tri.v1);
+	float caCrossRow0 = Cross2D(caEdge, point0 - tri.v2);
 
 	bool abFlag = IsTopLeft(abEdge);
 	bool bcFlag = IsTopLeft(bcEdge);
 	bool caFlag = IsTopLeft(caEdge);
+	float invArea = 1.0f / area;
 
-	for (int y = floorf(ymin); y <= ceilf(ymax); y++) {
-		for (int x = floorf(xmin); x <= ceilf(xmax); x++) {
+	for (int y = ymin; y <= ymax; y++) {
 
-			Vector2 p{ (float)x + 0.5f, (float)y + 0.5f };
-			Vector2 abToP = p - tri.v0;
-			Vector2 bcToP = p - tri.v1;
-			Vector2 caToP = p - tri.v2;
+		float crossAB = abCrossRow0;
+		float crossBC = bcCrossRow0;
+		float crossCA = caCrossRow0;
 
-			// compute cross of each
-			float crossAB = Cross2D(abEdge, abToP);
-			float crossBC = Cross2D(bcEdge, bcToP);
-			float crossCA = Cross2D(caEdge, caToP);
+		for (int x = xmin; x <= xmax; x++) {
+			
+			
+
+			// go to pixel centre
+			//Vector2 p{ (float)x + 0.5f, (float)y + 0.5f };
+
+			//Vector2 abToP = p - tri.v0;
+			//Vector2 bcToP = p - tri.v1;
+			//Vector2 caToP = p - tri.v2;
+
+			//// compute cross of each
+			//float crossAB = Cross2D(abEdge, abToP);
+			//float crossBC = Cross2D(bcEdge, bcToP);
+			//float crossCA = Cross2D(caEdge, caToP);
+
+		
 
 			if (EdgeCheck(crossAB, abFlag) &&
 				EdgeCheck(crossBC, bcFlag) &&
-				EdgeCheck(crossCA, caFlag)) {
-				PutPixel(x, y, (u32)COLOURS::WHITE);
+				EdgeCheck(crossCA, caFlag))
+			{
+				//barycentrics 
+
+				float alpha = crossBC* invArea;
+				float beta =  crossCA* invArea;
+				float gamma = crossAB* invArea;
+
+				
+
+				float* d = (float*)buffer.depth;
+				float oldDepth = d[y * buffer.width + x];
+
+				
+				float newDepth = alpha * depth[0] + beta * depth[1] + gamma * depth[2]; // interpolate depth using barycentrics
+
+				if (!(newDepth < oldDepth)) {
+					continue;
+				}
+
+				d[y * buffer.width + x] = newDepth;
+
+
+
+				u8 a = 0xFF;
+				u8 r = alpha * colours[0].r + beta * colours[1].r + gamma * colours[2].r;
+				u8 g = alpha * colours[0].g + beta * colours[1].g + gamma * colours[2].g;
+				u8 b = alpha * colours[0].b + beta * colours[1].b + gamma * colours[2].b;
+
+				u32 colour = 0x00000000;
+				colour = (colour | a) << 8;
+				colour = (colour | b) << 8;
+				colour = (colour | g) << 8;
+				colour = (colour | r);
+
+				PutPixel(x, y, colour);
 			}
-			
+			// acculumuate across the x
+			crossAB += deltaAbCol;
+			crossBC += deltaBcCol;
+			crossCA += deltaCaCol;
 		}
+		// acculumuate across the y
+		abCrossRow0 += deltaAbRow;
+		bcCrossRow0	+= deltaBcRow;
+		caCrossRow0	+= deltaCaRow;
 	}
 }
 
 void RenderModels(std::vector<Object>& models) {
-
-	for (const auto& m : models) {
+	models[0].transformCache.assign(models[0].model->verts.size(), Vector4{ 0,0,0,0 }); // TODO: This is a temp fix, 
+	// instead use a cache flag boolean array, then instead if if(isEmpty), do if(flag), if not then recacl
+	for (auto& m : models) {
 		auto& faces = m.model->faces;
 		Transform transform = m.transform;
 		Matrix4D model = MakeModelMatrix(transform);
@@ -680,13 +794,54 @@ void RenderModels(std::vector<Object>& models) {
 
 
 
-			auto v0world = model * v0;
-			auto v1world = model * v1;
-			auto v2world = model * v2;
+			Vector4 v0view;
+			Vector4 v1view;
+			Vector4 v2view;
 
-			auto v0view = v * v0world;
-			auto v1view = v * v1world;
-			auto v2view = v * v2world;
+			if (!m.transformCache[face.a].isEmpty()) {
+				v0view = m.transformCache[face.a];
+			}
+			else {
+				Vector4 v0world = model * v0;
+				v0view = v * v0world;
+				m.transformCache[face.a] = v0view;
+			}
+			if (!m.transformCache[face.b].isEmpty()) {
+				v1view = m.transformCache[face.b];
+			}
+			else {
+				Vector4 v1world = model * v1;
+				v1view = v * v1world;
+				m.transformCache[face.b] = v1view;
+			}
+			if (!m.transformCache[face.c].isEmpty()) {
+				v2view = m.transformCache[face.c];
+			}
+			else {
+				Vector4 v2world = model * v2;
+				v2view = v * v2world;
+				m.transformCache[face.c] = v2view;
+			}
+
+			//auto v0world = model * v0;
+			//auto v1world = model * v1;
+			//auto v2world = model * v2;
+
+			//Vector4 v0view = v * v0world;
+			//Vector4 v1view = v * v1world;
+			//Vector4 v2view = v * v2world;
+
+
+
+
+			m.transformCache[face.a] = v0view;
+			m.transformCache[face.b] = v1view;
+			m.transformCache[face.c] = v2view;
+
+
+			// TODO - BACKFACE CULLING IN VIEW SPACE
+			// compute normal and facing, take 3d cross. if < 0, cull
+
 
 
 			if (v0view.z <= -NEAR_PLANE &&
@@ -697,17 +852,32 @@ void RenderModels(std::vector<Object>& models) {
 				auto v1clip = p * v1view;
 				auto v2clip = p * v2view;
 
+
+
+
+
 				v0clip /= v0clip.w;
 				v1clip /= v1clip.w;
 				v2clip /= v2clip.w;
+
+
 
 				auto screen0 = NDCToScreen(v0clip);
 				auto screen1 = NDCToScreen(v1clip);
 				auto screen2 = NDCToScreen(v2clip);
 
-				//ScanlineRasterize(screen0, screen1, screen2);
-				EdgeFunctionRasterize(screen0, screen1, screen2);
+				 //depth buffer is [-1,1]. smaller the z the closer the camera
 
+				if (v0clip.z < -1 || v0clip.z > 1 || v1clip.z < -1 || v1clip.z > 1 || v2clip.z < -1 || v2clip.z > 1) {
+					continue;
+				}
+
+				float* d = new float[3];
+				d[0] = v0clip.z; d[1] = v1clip.z; d[2] = v2clip.z;
+				//ScanlineRasterize(screen0, screen1, screen2);
+				EdgeFunctionRasterize(screen0, screen1, screen2,d);
+
+				delete[] d;
 
 				//DrawTriangle(tri);
 		
@@ -769,6 +939,7 @@ void DrawTriangle(Triangle t) {
 	);
 }
 
+
 void PutPixel(i32 x, i32 y, u32 color)
 {
 	if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) {
@@ -795,6 +966,9 @@ inline void render(HWND hwnd) {
 }
 
 
+
+
+#include <span>
 int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine, int CmdShow) {
 
 
@@ -804,13 +978,18 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 	Object object;
 	object.model = &model;
 
+	std::vector<Vector4> tcache(object.model->verts.size(), 0);
+
+	object.transformCache = tcache;
+	
+
 	Object object2;
 	//object2.model = &model2b;
 
 	Transform transform;
 	transform.position = { 0,0,0,1 };
 	transform.scale = { 1,1,1,1 };
-	transform.rotation = { 0,0,0,0 };
+	transform.rotation = { 0,0,0,0 };	
 	object.transform = transform;
 
 	//Transform transform2;
@@ -819,6 +998,7 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 
 	std::vector<Object> objects;
 	objects.push_back(object);
+
 	//objects.push_back(object2);
 
 	//Model model1("diablo3.obj");
@@ -826,9 +1006,8 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 	//static u32 winheight = 1440;
 
 
-	camera.position = Vector4{ 0,1,3,1 };
-	camera.rotation = Vector4{ 0,0,0,0 };
-
+	camera.position = Vector4{ 0, 0, 5, 1 };
+	camera.rotation = Vector4{ 0, 0, 0, 0 };
 
 	v = MakeViewMatrix();
 	p = MakePerspective();
@@ -873,7 +1052,38 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 	Vector2 v4 = { 750,200 };
 
 	
+	Model cube = {
+		// verts
+		{
+			{ 0,  1,  0}, // 0 top
+			{-1, -1, -1}, // 1 back-left
+			{ 1, -1, -1}, // 2 back-right
+			{ 0, -1,  1}, // 3 front
+		},
 
+		// faces (CCW winding viewed from outside)
+		{
+			// Front
+			{0, 3, 2},
+
+			// Right
+			{0, 2, 1},
+
+			// Back
+			{0, 1, 3},
+
+			// Bottom
+			{1, 2, 3},
+		}
+	};
+	Object cubeObj;
+	cubeObj.model = &cube;
+	transform.position = { 0,0,0,1 };
+	cubeObj.transform = transform;
+	std::vector<Object> cub = { cubeObj };
+
+
+	
 	while (running) {
 		//Timer timer;
 		if (msg.message == WM_QUIT) {
@@ -886,15 +1096,17 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 		}
 		// rotate object around
 		objects[0].transform.rotation.y += 0.1;
-
-		ClearScreen();
+		
+		ClearFrameData();
 		RenderModels(objects);
+		//RenderModels(cub);
 		//EdgeFunctionRasterize(v0, v1, v2,COLOURS::RED);
 		//EdgeFunctionRasterize(v3, v2, v1, COLOURS::SKIN);
 		//EdgeFunctionRasterize(v4, v1, v0, COLOURS::WHITE);
 		render(hwnd);
 
-
+		
+		
 		/*
 		* 
 			HandleInput(scene.camera)
@@ -923,6 +1135,8 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 
 		lastCycleCount = endCycleCount;
 		lastCounter = endCounter;
+
+		
 	}
 }
 
@@ -954,7 +1168,7 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 //
 //
 //	void Render(HWND hwnd, Scene& scene) {
-//		ClearScreen();
+//		ClearFrameData();
 //		RenderModels(scene.objects);
 //		render(hwnd);
 //	}

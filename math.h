@@ -21,7 +21,9 @@ inline float radians_to_degrees(float radians)
 {
 	return radians * (180.0f / PI);
 };
-
+constexpr float lerp(float a, float b, float t) {
+	return a + t * (b - a);
+}
 struct Vector3 {
 	union {
 		struct { float x, y, z; };
@@ -341,6 +343,10 @@ struct Vector4 {
 	[[nodiscard]] Vector4 operator*(float rhs) const {
 		return Vector4(x * rhs, y * rhs, z * rhs,1);
 	}
+
+	bool isEmpty() const {
+		return this->x == 0 && this->y == 0 && this->z == 0;
+	}
 	//__forceinline Vector4& operator-=(const Vector3& rhs) {
 	//	x -= rhs.x;
 	//	y -= rhs.y;
@@ -644,6 +650,9 @@ struct Vector2{
 	constexpr Vector2() : Vector2(0.f) {};
 	constexpr Vector2(Vector3 v3) : x(v3.x), y(v3.y) {};
 
+
+
+
 	Vector2& operator*=(float rhs) {
 		x *= rhs;
 		y *= rhs;
@@ -651,6 +660,12 @@ struct Vector2{
 	}
 	[[nodiscard]] Vector2 operator*(float rhs) const {
 		return Vector2(x * rhs, y * rhs);
+	}
+	[[nodiscard]] Vector2 operator+(Vector2 lhs) {
+		return Vector2{
+			this->x + lhs.x,
+			this->y + lhs.y
+		};
 	}
 	__forceinline Vector2& operator-=(const Vector2& rhs) {
 		x -= rhs.x;
@@ -716,6 +731,12 @@ struct Vector2{
 };
 
 
+//inline float Cross2D(const Vector2& lhs, const Vector2& rhs) {
+//	return lhs.x * rhs.y - lhs.y * rhs.x;
+//}
+//inline int Cross2D(const Vector2& lhs, const Vector2& rhs) {
+//	return lhs.x * rhs.y - lhs.y * rhs.x;
+//}
 
 inline Vector2 AngleToDirection(float degrees) {
 	float radians = degrees_to_radians(degrees);
