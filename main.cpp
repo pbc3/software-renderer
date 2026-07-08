@@ -774,7 +774,7 @@ void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2, float depth[3]) {
 }
 
 void RenderModels(std::vector<Object>& models) {
-	models[0].transformCache.assign(models[0].model->verts.size(), Vector4{ 0,0,0,0 }); // TODO: This is a temp fix, 
+	models[0].transformCache.assign(models[0].model->verts.size(), Vector4{ 0,0,0,0 }); // TODO -temp fix, 
 	// instead use a cache flag boolean array, then instead if if(isEmpty), do if(flag), if not then recacl
 	for (auto& m : models) {
 		auto& faces = m.model->faces;
@@ -802,24 +802,27 @@ void RenderModels(std::vector<Object>& models) {
 				v0view = m.transformCache[face.a];
 			}
 			else {
-				Vector4 v0world = model * v0;
-				v0view = v * v0world;
+				//Vector4 v0world = model * v0;
+				//v0view = v * v0world;
+				v0view = MV * v0;
 				m.transformCache[face.a] = v0view;
 			}
 			if (!m.transformCache[face.b].isEmpty()) {
 				v1view = m.transformCache[face.b];
 			}
 			else {
-				Vector4 v1world = model * v1;
-				v1view = v * v1world;
+				//Vector4 v1world = model * v1;
+				//v1view = v * v1world;
+				v1view = MV * v1;
 				m.transformCache[face.b] = v1view;
 			}
 			if (!m.transformCache[face.c].isEmpty()) {
 				v2view = m.transformCache[face.c];
 			}
 			else {
-				Vector4 v2world = model * v2;
-				v2view = v * v2world;
+				//Vector4 v2world = model * v2;
+				//v2view = v * v2world;
+				v2view = MV * v2;
 				m.transformCache[face.c] = v2view;
 			}
 
@@ -872,12 +875,19 @@ void RenderModels(std::vector<Object>& models) {
 					continue;
 				}
 
-				float* d = new float[3];
+				//float* d = new float[3];
+				//d[0] = v0clip.z; d[1] = v1clip.z; d[2] = v2clip.z;
+				////ScanlineRasterize(screen0, screen1, screen2);
+				//EdgeFunctionRasterize(screen0, screen1, screen2,d);
+
+				//delete[] d;
+
+
+
+				float d[3];
 				d[0] = v0clip.z; d[1] = v1clip.z; d[2] = v2clip.z;
 				//ScanlineRasterize(screen0, screen1, screen2);
-				EdgeFunctionRasterize(screen0, screen1, screen2,d);
-
-				delete[] d;
+				EdgeFunctionRasterize(screen0, screen1, screen2, d);
 
 				//DrawTriangle(tri);
 		
