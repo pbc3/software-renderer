@@ -780,12 +780,14 @@ void RenderModels(std::vector<Object>& models) {
 		auto& faces = m.model->faces;
 		Transform transform = m.transform;
 		Matrix4D model = MakeModelMatrix(transform);
-		Matrix4D MVP = p * v * model;
+		//Matrix4D MVP = p * v * model; // 
 		Matrix4D MV = v * model;
+
 		float xmin= FLT_MAX;
 		float ymin= FLT_MAX;
 		float xmax= -FLT_MAX;
 		float ymax= -FLT_MAX;
+
 		for (const auto& face : faces) {
 
 			Vector4 v0{ m.model->verts[face.a],1 }; // THESE ARE IN LOCAL SPACE
@@ -797,13 +799,13 @@ void RenderModels(std::vector<Object>& models) {
 			Vector4 v0view;
 			Vector4 v1view;
 			Vector4 v2view;
+			
+
 
 			if (!m.transformCache[face.a].isEmpty()) {
 				v0view = m.transformCache[face.a];
 			}
 			else {
-				//Vector4 v0world = model * v0;
-				//v0view = v * v0world;
 				v0view = MV * v0;
 				m.transformCache[face.a] = v0view;
 			}
@@ -811,8 +813,6 @@ void RenderModels(std::vector<Object>& models) {
 				v1view = m.transformCache[face.b];
 			}
 			else {
-				//Vector4 v1world = model * v1;
-				//v1view = v * v1world;
 				v1view = MV * v1;
 				m.transformCache[face.b] = v1view;
 			}
@@ -820,11 +820,28 @@ void RenderModels(std::vector<Object>& models) {
 				v2view = m.transformCache[face.c];
 			}
 			else {
-				//Vector4 v2world = model * v2;
-				//v2view = v * v2world;
 				v2view = MV * v2;
 				m.transformCache[face.c] = v2view;
 			}
+
+			// backface culling
+
+
+			// calculate surface normal
+			Vector4 edge1 = (v1view - v0view);
+			Vector4 edge2 = (v2view - v0view);
+			Vector4 normal = edge1.cross(edge2).normalized();
+
+			// compare with camera dir
+			if (normal.Dot(FORWARD) < 0) {
+				continue;
+			}
+
+
+
+			
+
+
 
 			//auto v0world = model * v0;
 			//auto v1world = model * v1;
@@ -952,10 +969,10 @@ void DrawTriangle(Triangle t) {
 
 void PutPixel(i32 x, i32 y, u32 color)
 {
-	if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) {
-		//OutputDebugStringA("OUT OF BOUNDS");
-		return;
-	}
+	//if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) { // think im covering this elsewhere.
+	//	//OutputDebugStringA("OUT OF BOUNDS");
+	//	return;
+	//}
 
 	u32* pixels = (u32*)buffer.memory;
 	pixels[y * buffer.width + x] = color;
@@ -982,7 +999,7 @@ inline void render(HWND hwnd) {
 int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine, int CmdShow) {
 
 
-	Model model("Mutsuki.obj");
+	Model model("tifa.obj");
 	//Model model2b("2B.obj");
 
 	Object object;
@@ -998,7 +1015,7 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 
 	Transform transform;
 	transform.position = { 0,0,0,1 };
-	transform.scale = { 1,1,1,1 };
+	transform.scale = {1,1,1,1 };
 	transform.rotation = { 0,0,0,0 };	
 	object.transform = transform;
 
