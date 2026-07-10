@@ -97,7 +97,7 @@ static Matrix4D p;
 static Matrix4D v;
 
 
-Matrix4D MakePerspective();
+Matrix4D MakePerspective(float fovDeg);
 Matrix4D MakeViewMatrix();
 void DrawLine(u32 x0, u32 y0, u32 x1, u32 y1);
 inline void render(HWND hwnd);
@@ -258,7 +258,7 @@ LRESULT WndProc(HWND hwnd, UINT MSG, WPARAM wParam, LPARAM lParam) {
 		bool WasDown = ((lParam & (1 << 30)) != 0); // if true - this is a auto-repeat (key held down) stroke, false = initial stroke
 		bool IsDown = ((lParam & (1 << 31)) == 0); // check current state of the key - true = currently being pressed false = not being pressed
 		if (VKCode == 'R') {
-			camera.rotation.y += 1;
+			camera.rotation.x += 1;
 			v = MakeViewMatrix();
 		}
 		if (VKCode == 'O') {
@@ -317,7 +317,7 @@ LRESULT WndProc(HWND hwnd, UINT MSG, WPARAM wParam, LPARAM lParam) {
 			centreScreenX = winSize.windowWidth / 2;
 			centreScreenY = winSize.windowHeight / 2;
 			//v = MakeViewMatrix();
-			p = MakePerspective();
+			p = MakePerspective(30);
 		}
 		DisplayBitmapInWindow(winData, buffer);
 		EndPaint(hwnd, &paint);
@@ -444,8 +444,8 @@ Vector4 LocalToWorld(Vector4 v, Transform transform) {
 	return v_world;
 }
 
-Matrix4D MakePerspective() {
-	float fov = degrees_to_radians(45.6);
+Matrix4D MakePerspective(float fovDeg) {
+	float fov = degrees_to_radians(fovDeg);
 	float tanHalfFovy = std::tanf(fov / 2);
 	// f = fov scaling factor. we mul our x and y by this f to either shrink or grow objects depending on the fov(zoom factor)
 	float f = 1 / tanHalfFovy;
@@ -801,7 +801,7 @@ void RenderModels(std::vector<Object>& models) {
 			Vector4 v2view;
 			
 
-
+			// transform caching
 			if (!m.transformCache[face.a].isEmpty()) {
 				v0view = m.transformCache[face.a];
 			}
@@ -827,19 +827,20 @@ void RenderModels(std::vector<Object>& models) {
 			// backface culling
 
 
+			
 			// calculate surface normal
 			Vector4 edge1 = (v1view - v0view);
 			Vector4 edge2 = (v2view - v0view);
 			Vector4 normal = edge1.cross(edge2).normalized();
 
-			// compare with camera dir
-			if (normal.Dot(FORWARD) < 0) {
+
+			// calculate a vector pointing at the camera/screen/eye
+			Vector4 triToEye = -v0view;
+
+			// compare with vector that we know is pointing at the camera. >0 = same relative dir. else cull
+			if (normal.Dot(triToEye) <= 0) {
 				continue;
 			}
-
-
-
-			
 
 
 
@@ -854,16 +855,9 @@ void RenderModels(std::vector<Object>& models) {
 
 
 
-			m.transformCache[face.a] = v0view;
-			m.transformCache[face.b] = v1view;
-			m.transformCache[face.c] = v2view;
 
 
-			// TODO - BACKFACE CULLING IN VIEW SPACE
-			// compute normal and facing, take 3d cross. if < 0, cull
-
-
-
+			//TODO - MAKE BETTER CLIPPING. this is crude. BVH
 			if (v0view.z <= -NEAR_PLANE &&
 				v1view.z <= -NEAR_PLANE &&
 				v2view.z <= -NEAR_PLANE) {
@@ -892,12 +886,7 @@ void RenderModels(std::vector<Object>& models) {
 					continue;
 				}
 
-				//float* d = new float[3];
-				//d[0] = v0clip.z; d[1] = v1clip.z; d[2] = v2clip.z;
-				////ScanlineRasterize(screen0, screen1, screen2);
-				//EdgeFunctionRasterize(screen0, screen1, screen2,d);
 
-				//delete[] d;
 
 
 
@@ -916,23 +905,23 @@ void RenderModels(std::vector<Object>& models) {
 		}
 		}
 
-		//// debug box
-		//int left = (int)floorf(xmin);
-		//int right = (int)ceilf(xmax);
-		//int top = (int)floorf(ymin);
-		//int bottom = (int)ceilf(ymax);
+		// debug box - UNSAFE. add buffer.w/h checking
+		int left = (int)floorf(xmin);
+		int right = (int)ceilf(xmax);
+		int top = (int)floorf(ymin);
+		int bottom = (int)ceilf(ymax);
 
-		//for (int x = left; x <= right; x++)
-		//{
-		//	PutPixel(x, top, (u32)COLOURS::RED);
-		//	PutPixel(x, bottom, (u32)COLOURS::RED);
-		//}
+		for (int x = left; x <= right; x++)
+		{
+			PutPixel(x, top, (u32)COLOURS::RED);
+			PutPixel(x, bottom, (u32)COLOURS::RED);
+		}
 
-		//for (int y = top; y <= bottom; y++)
-		//{
-		//	PutPixel(left, y, (u32)COLOURS::RED);
-		//	PutPixel(right, y, (u32)COLOURS::RED);
-		//}
+		for (int y = top; y <= bottom; y++)
+		{
+			PutPixel(left, y, (u32)COLOURS::RED);
+			PutPixel(right, y, (u32)COLOURS::RED);
+		}
 	}
 }
 
@@ -969,10 +958,10 @@ void DrawTriangle(Triangle t) {
 
 void PutPixel(i32 x, i32 y, u32 color)
 {
-	//if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) { // think im covering this elsewhere.
-	//	//OutputDebugStringA("OUT OF BOUNDS");
-	//	return;
-	//}
+	if (x < 0 || y < 0 || x >= buffer.width || y >= buffer.height) { // think im covering this elsewhere.
+		//OutputDebugStringA("OUT OF BOUNDS");
+		return;
+	}
 
 	u32* pixels = (u32*)buffer.memory;
 	pixels[y * buffer.width + x] = color;
@@ -999,7 +988,7 @@ inline void render(HWND hwnd) {
 int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine, int CmdShow) {
 
 
-	Model model("tifa.obj");
+	Model model("Mutsuki.obj");
 	//Model model2b("2B.obj");
 
 	Object object;
@@ -1014,7 +1003,7 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 	//object2.model = &model2b;
 
 	Transform transform;
-	transform.position = { 0,0,0,1 };
+	transform.position = { 0,-1,3,1 };
 	transform.scale = {1,1,1,1 };
 	transform.rotation = { 0,0,0,0 };	
 	object.transform = transform;
@@ -1037,7 +1026,7 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 	camera.rotation = Vector4{ 0, 0, 0, 0 };
 
 	v = MakeViewMatrix();
-	p = MakePerspective();
+	p = MakePerspective(30);
 
 
 	WNDCLASSEX windowclass{};
@@ -1080,27 +1069,43 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 
 	
 	Model cube = {
-		// verts
+		// Vertices
 		{
-			{ 0,  1,  0}, // 0 top
-			{-1, -1, -1}, // 1 back-left
-			{ 1, -1, -1}, // 2 back-right
-			{ 0, -1,  1}, // 3 front
+			{-1, -1, -1}, // 0
+			{ 1, -1, -1}, // 1
+			{ 1,  1, -1}, // 2
+			{-1,  1, -1}, // 3
+			{-1, -1,  1}, // 4
+			{ 1, -1,  1}, // 5
+			{ 1,  1,  1}, // 6
+			{-1,  1,  1}, // 7
 		},
 
-		// faces (CCW winding viewed from outside)
+		// Triangles (CCW winding from outside)
 		{
-			// Front
-			{0, 3, 2},
+			// Front (+Z)
+			{4, 5, 6},
+			{4, 6, 7},
 
-			// Right
-			{0, 2, 1},
+			// Back (-Z)
+			{1, 0, 3},
+			{1, 3, 2},
 
-			// Back
-			{0, 1, 3},
+			// Left (-X)
+			{0, 4, 7},
+			{0, 7, 3},
 
-			// Bottom
-			{1, 2, 3},
+			// Right (+X)
+			{5, 1, 2},
+			{5, 2, 6},
+
+			// Top (+Y)
+			{3, 7, 6},
+			{3, 6, 2},
+
+			// Bottom (-Y)
+			{0, 1, 5},
+			{0, 5, 4},
 		}
 	};
 	Object cubeObj;
@@ -1122,14 +1127,12 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 			DispatchMessageW(&msg);
 		}
 		// rotate object around
-		objects[0].transform.rotation.y += 0.1;
-		
+		//cub[0].transform.rotation.y += 0.01;
+	
+		//cub[0].transform.rotation.z += 0.01;
 		ClearFrameData();
-		RenderModels(objects);
-		//RenderModels(cub);
-		//EdgeFunctionRasterize(v0, v1, v2,COLOURS::RED);
-		//EdgeFunctionRasterize(v3, v2, v1, COLOURS::SKIN);
-		//EdgeFunctionRasterize(v4, v1, v0, COLOURS::WHITE);
+		//RenderModels(objects);
+		RenderModels(cub);
 		render(hwnd);
 
 		
@@ -1168,63 +1171,3 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 }
 
 
-//struct Camera {
-//	Transform transform;
-//	Matrix4D v;
-//	Matrix4D p;
-//	float fovDeg;
-//
-//
-//
-//};
-//struct Scene {
-//	std::vector<Object> objects;
-//	Camera camera;
-//};
-//static Scene scene;
-//Camera camera;
-//Transform camTrans;
-//camTrans.rotation = { 0,0,0,0 };
-//camTrans.position = { 0,0,5,0 };
-//camera.v = MakeViewMatrix();
-//camera.fovDeg = 45;
-//camera.p = MakePerspective(camera.fovDeg);
-//struct Renderer {
-//
-//	Framebuffer buffer;
-//
-//
-//	void Render(HWND hwnd, Scene& scene) {
-//		ClearFrameData();
-//		RenderModels(scene.objects);
-//		render(hwnd);
-//	}
-//
-//	void Resize(HWND hwnd) {
-//		WindowData frameWinData(hwnd);
-//		if (frameWinData.windowSize.windowWidth != buffer.width ||
-//			frameWinData.windowSize.windowHeight != buffer.height) {
-//			ResizeBitmap(buffer, frameWinData.windowSize.windowWidth, frameWinData.windowSize.windowHeight);
-//			centreScreenX = frameWinData.windowSize.windowWidth / 2;
-//			centreScreenY = frameWinData.windowSize.windowHeight / 2;
-//		}
-//	}
-//
-//
-//};
-/*
-OK lets try again.
-
-aim for now, singleton Scene instance, so i can access the matrices in my current pipeline
-this can change
-so instantiate in global, populate in main
-
-
-
-I want
-Camera { p, v, fov }
-Scene{
-models,camera
-}
-Renderer{buffer, resize,  render functions}
-*/
