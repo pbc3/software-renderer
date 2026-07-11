@@ -21,7 +21,7 @@ inline float radians_to_degrees(float radians)
 {
 	return radians * (180.0f / PI);
 };
-constexpr float lerp(float a, float b, float t) {
+constexpr float Lerp(float a, float b, float t) {
 	return a + t * (b - a);
 }
 struct Vector3 {
@@ -347,6 +347,11 @@ struct Vector4 {
 	bool isEmpty() const {
 		return this->x == 0 && this->y == 0 && this->z == 0;
 	}
+	Vector4 normalized()
+	{
+		float len = length();
+		return Vector4(x / len, y / len, z / len,1);
+	}
 	//__forceinline Vector4& operator-=(const Vector3& rhs) {
 	//	x -= rhs.x;
 	//	y -= rhs.y;
@@ -364,21 +369,35 @@ struct Vector4 {
 	Vector4 operator-() const {
 		return Vector4{ -x, -y, -z, -w };
 	}
-	void operator/=(float rhs) {
-		this->x /= rhs;
-		this->y /= rhs;
-		this->z /= rhs;
+	inline constexpr Vector4 cross(const Vector4& rhs) {
+		return Vector4
+		(this->y * rhs.z - this->z * rhs.y,
+			this->z * rhs.x - this->x * rhs.z,
+			this->x * rhs.y - this->y * rhs.x,1
+		);
 	}
-	//[[nodiscard]] float length() const noexcept
-	//{
-	//	return std::hypot(x, y, z);
-	//}
-	//float lengthSqaured() {
-	//	float sx = x * x;
-	//	float sy = y * y;
-	//	float sz = z * z;
-	//	return sx + sy + sz;
-	//}
+	void operator/=(float rhs) {
+
+		auto inv = 1.0f / rhs;
+
+		this->x *= inv;
+		this->y *= inv;
+		this->z *= inv;
+
+		//this->x /= rhs;
+		//this->y /= rhs;
+		//this->z /= rhs;
+	}
+	[[nodiscard]] float length() const noexcept
+	{
+		return std::hypot(x, y, z);
+	}
+	float lengthSqaured() {
+		float sx = x * x;
+		float sy = y * y;
+		float sz = z * z;
+		return sx + sy + sz;
+	}
 	//void normalize()
 	//{
 
@@ -398,10 +417,10 @@ struct Vector4 {
 	//	return std::format("{}, {}, {}", x, y, z);
 	//}
 
-	//__forceinline
-	//	constexpr float Dot(const Vector4& rhs) const {
-	//	return (this->x * rhs.x) + (this->y * rhs.y) + (this->z * rhs.z);
-	//}
+	__forceinline
+		constexpr float Dot(const Vector4& rhs) const {
+		return (this->x * rhs.x) + (this->y * rhs.y) + (this->z * rhs.z);
+	}
 
 	//inline constexpr Vector3 cross(const Vector3& rhs) const {
 	//	return Vector3

@@ -153,10 +153,24 @@ struct Model {
 				Face face{};
 
 				int a, b, c;
-				int matched = sscanf(lineStart, "f %d/%*d/%*d %d/%*d/%*d %d/%*d/%*d", &a, &b, &c);
+
+				// Try f v/vt/vn
+				int matched = sscanf(lineStart,
+					"f %d/%*d/%*d %d/%*d/%*d %d/%*d/%*d",
+					&a, &b, &c);
+
+				// Try f v
+				if (matched != 3) {
+					matched = sscanf(lineStart,
+						"f %d %d %d",
+						&a, &b, &c);
+				}
+
 				if (matched == 3) {
-					face.a = a; face.b = b; face.c = c;
-					face.a--; face.b--; face.c--;
+					face.a = a - 1;
+					face.b = b - 1;
+					face.c = c - 1;
+
 					faces.push_back(face);
 				}
 			}
@@ -220,11 +234,28 @@ void FramebufferRenderColour(u32 color) {
 	}
 }
 
-void ClearFrameData() {
+void ClearFrameData(u32 color) {
+	// for each pixel, set the 8 green bits on and turn everything else off
+	// RR GG BB AA
+	// AA BB GG RR
+	// loop height->width because we go row -> each column entry -> next row?
+	u32* pixels = (u32*)buffer.memory;
 	float* db = (float*)buffer.depth;
-	std::fill(db, db + buffer.width * buffer.height, FLT_MAX);
-	FramebufferRenderColour(0x00000000);
+
+	for (u32 y = 0; y < buffer.height; y++) {
+		for (u32 x = 0; x < buffer.width; x++) {
+			pixels[(y * buffer.width) + x] = color; // green
+			db[(y * buffer.width) + x] = FLT_MAX;
+			//PutPixel(x, y, 0x0);
+		}
+	}
 }
+
+//void ClearFrameData() {
+//	float* db = (float*)buffer.depth;
+//	//std::fill(db, db + buffer.width * buffer.height, FLT_MAX);
+//	FramebufferRenderColour(0x00000000);
+//}
 	
 
 
@@ -386,6 +417,8 @@ struct Object {
 	Model* model; // heavy ? use pointer.. can i even copy it... ? will perform a copy on the vec
 	Transform transform;
 	std::vector<Vector4> transformCache;
+	std::vector<u32> cacheFrame;
+	u32 frameCount;
 };
 
 constexpr float NEAR_PLANE = 1.f;
@@ -451,8 +484,8 @@ Matrix4D MakePerspective(float fovDeg) {
 	float f = 1 / tanHalfFovy;
 	float& d = f;
 	float ar = (float)buffer.height / (float)buffer.width;
-	float zNear = 1.0f;
-	float zFar = 10.f;
+	float zNear = 1.f;
+	float zFar = 1000.f;
 	float zRange = zNear - zFar;
 	float a = (-zFar - zNear) / zRange;
 	float b = (2 * zFar * zNear / zRange);
@@ -682,10 +715,6 @@ void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2, float depth[3]) {
 	float deltaAbCol = tri.v0.y - tri.v1.y;  // -(b.y - a.y)
 	float deltaAbRow = tri.v1.x - tri.v0.x;  //  b.x - a.x
 
-	// if covered pixel is tiny toss it... idk about this, zoom out = less pixels..looks weird
-	//if (area < 1.0f) {
-	//	return;
-	//}
 
 	Vector2 point0 = { float(xmin + 0.5f), float(ymin + 0.5f) };
 
@@ -697,7 +726,6 @@ void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2, float depth[3]) {
 	bool bcFlag = IsTopLeft(bcEdge);
 	bool caFlag = IsTopLeft(caEdge);
 	float invArea = 1.0f / area;
-
 	for (int y = ymin; y <= ymax; y++) {
 
 		float crossAB = abCrossRow0;
@@ -772,9 +800,80 @@ void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2, float depth[3]) {
 		caCrossRow0	+= deltaCaRow;
 	}
 }
+volatile int hits = 0;
+volatile int misses = 0;
 
+
+// Sutherland–Hodgman polygon clippppper
+Vector4 IntersectNear(Vector4 a, Vector4 b) {
+	float t = (-NEAR_PLANE - a.z) / (b.z - a.z);
+	Vector4 r;
+	r.x = Lerp(a.x, b.x, t);
+	r.y = Lerp(a.y, b.y, t);
+	r.z = Lerp(a.z, b.z, t);
+	return r;
+}
+bool InsideNear(Vector4 v) {
+	return v.z <= -NEAR_PLANE;
+}
+std::vector<Vector4> ClipAgainstNear(const std::vector<Vector4>& input) {
+
+	std::vector<Vector4> out;
+	for (int i = 0; i < input.size(); ++i) {
+		Vector4 cur = input[i];
+		Vector4 prev = input[(i + input.size() - 1) % input.size()];
+
+		bool currInside = InsideNear(cur);
+		bool prevInside = InsideNear(prev);
+
+		// case 1 - both inside
+		if (currInside && prevInside) {
+			out.push_back(cur);
+		}
+		// case 2  inside->outside - keep the edge up to the plane(intersection)
+		else if (prevInside && !currInside) {
+			out.push_back(IntersectNear(prev, cur));
+		}
+		// case 3 outside -> inside
+		
+		else if (!prevInside && currInside) {
+			out.push_back(IntersectNear(prev, cur));
+			out.push_back(cur);
+		}
+		// case 4 - both outside, return insertsect of prev and current unchanged
+	}
+	return out;
+
+}
+// sep function so clipping that produces a new tri works
+void HandleViewSpaceTriangle(const Vector4& v0view,
+	const Vector4& v1view,
+	const Vector4& v2view) {
+
+	auto v0clip = p * v0view;
+	auto v1clip = p * v1view;
+	auto v2clip = p * v2view;
+
+	v0clip /= v0clip.w;
+	v1clip /= v1clip.w;
+	v2clip /= v2clip.w;
+
+	auto screen0 = NDCToScreen(v0clip);
+	auto screen1 = NDCToScreen(v1clip);
+	auto screen2 = NDCToScreen(v2clip);
+	//depth buffer is [-1,1]. smaller the z the closer the camera
+
+	//if (v0clip.z < -1 || v0clip.z > 1 || v1clip.z < -1 || v1clip.z > 1 || v2clip.z < -1 || v2clip.z > 1) {
+	//	return;
+	//}
+
+	float d[3];
+	d[0] = -v0view.z; d[1] = -v1view.z; d[2] = -v2view.z;
+	//ScanlineRasterize(screen0, screen1, screen2);
+	EdgeFunctionRasterize(screen0, screen1, screen2, d);
+}
 void RenderModels(std::vector<Object>& models) {
-	models[0].transformCache.assign(models[0].model->verts.size(), Vector4{ 0,0,0,0 }); // TODO -temp fix, 
+	//models[0].transformCache.assign(models[0].model->verts.size(), Vector4{ 0,0,0,0 }); // TODO -temp fix, 
 	// instead use a cache flag boolean array, then instead if if(isEmpty), do if(flag), if not then recacl
 	for (auto& m : models) {
 		auto& faces = m.model->faces;
@@ -799,31 +898,45 @@ void RenderModels(std::vector<Object>& models) {
 			Vector4 v0view;
 			Vector4 v1view;
 			Vector4 v2view;
-			
+			//v0view = MV * v0;
+			//v1view = MV * v1;
+			//v2view = MV * v2;
+
 
 			// transform caching
-			if (!m.transformCache[face.a].isEmpty()) {
+			if (m.cacheFrame[face.a] == m.frameCount) {
 				v0view = m.transformCache[face.a];
+				hits++;
 			}
 			else {
 				v0view = MV * v0;
 				m.transformCache[face.a] = v0view;
+				m.cacheFrame[face.a] = m.frameCount;
+				misses++;
 			}
-			if (!m.transformCache[face.b].isEmpty()) {
+			if (m.cacheFrame[face.b] == m.frameCount) {
 				v1view = m.transformCache[face.b];
+				hits++;
 			}
 			else {
 				v1view = MV * v1;
 				m.transformCache[face.b] = v1view;
+				m.cacheFrame[face.b] = m.frameCount;
+				misses++;
 			}
-			if (!m.transformCache[face.c].isEmpty()) {
+			if (m.cacheFrame[face.c] == m.frameCount) {
 				v2view = m.transformCache[face.c];
+				hits++;
 			}
 			else {
 				v2view = MV * v2;
 				m.transformCache[face.c] = v2view;
+				m.cacheFrame[face.c] = m.frameCount;
+				misses++;
 			}
 
+			volatile int sink = hits;
+			sink = misses;
 			// backface culling
 
 
@@ -854,74 +967,50 @@ void RenderModels(std::vector<Object>& models) {
 
 
 
+			// NEAR PLANE CLIPPER
 
 
+			std::vector<Vector4> clipped = ClipAgainstNear({ v0view,v1view,v2view });
+
+			// < 3 because 2 verts cant form a tri, 3 and 4 can..
+			if (clipped.size() < 3) {
+				continue;
+			}
+
+
+			for (int i = 1; i + 1 < clipped.size(); ++i) {
+				HandleViewSpaceTriangle(clipped[0], clipped[i], clipped[i + 1]);
+			}
 
 			//TODO - MAKE BETTER CLIPPING. this is crude. BVH
-			if (v0view.z <= -NEAR_PLANE &&
-				v1view.z <= -NEAR_PLANE &&
-				v2view.z <= -NEAR_PLANE) {
-
-				auto v0clip = p * v0view;
-				auto v1clip = p * v1view;
-				auto v2clip = p * v2view;
-
-
-
-
-
-				v0clip /= v0clip.w;
-				v1clip /= v1clip.w;
-				v2clip /= v2clip.w;
-
-
-
-				auto screen0 = NDCToScreen(v0clip);
-				auto screen1 = NDCToScreen(v1clip);
-				auto screen2 = NDCToScreen(v2clip);
-
-				 //depth buffer is [-1,1]. smaller the z the closer the camera
-
-				if (v0clip.z < -1 || v0clip.z > 1 || v1clip.z < -1 || v1clip.z > 1 || v2clip.z < -1 || v2clip.z > 1) {
-					continue;
-				}
-
-
-
-
-
-				float d[3];
-				d[0] = v0clip.z; d[1] = v1clip.z; d[2] = v2clip.z;
-				//ScanlineRasterize(screen0, screen1, screen2);
-				EdgeFunctionRasterize(screen0, screen1, screen2, d);
-
-				//DrawTriangle(tri);
 		
-				xmin = std::min({ xmin, screen0.x, screen1.x, screen2.x });
-				xmax = std::max({ xmax, screen0.x, screen1.x, screen2.x });
 
-				ymin = std::min({ ymin, screen0.y, screen1.y, screen2.y });
-				ymax = std::max({ ymax, screen0.y, screen1.y, screen2.y });
+		
+				//xmin = std::min({ xmin, screen0.x, screen1.x, screen2.x });
+				//xmax = std::max({ xmax, screen0.x, screen1.x, screen2.x });
+
+				//ymin = std::min({ ymin, screen0.y, screen1.y, screen2.y });
+				//ymax = std::max({ ymax, screen0.y, screen1.y, screen2.y });
 		}
-		}
+		
 
 		// debug box - UNSAFE. add buffer.w/h checking
-		int left = (int)floorf(xmin);
-		int right = (int)ceilf(xmax);
-		int top = (int)floorf(ymin);
-		int bottom = (int)ceilf(ymax);
+		//int left = (int)floorf(xmin);
+		//int right = (int)ceilf(xmax);
+		//int top = (int)floorf(ymin);
+		//int bottom = (int)ceilf(ymax);
 
-		for (int x = left; x <= right; x++)
-		{
-			PutPixel(x, top, (u32)COLOURS::RED);
-			PutPixel(x, bottom, (u32)COLOURS::RED);
-		}
+		//for (int x = left; x <= right; x++)
+		//{
+		//	PutPixel(x, top, (u32)COLOURS::RED);
+		//	PutPixel(x, bottom, (u32)COLOURS::RED);
+		//}
 
-		for (int y = top; y <= bottom; y++)
-		{
-			PutPixel(left, y, (u32)COLOURS::RED);
-			PutPixel(right, y, (u32)COLOURS::RED);
-		}
+		//for (int y = top; y <= bottom; y++)
+		//{
+		//	PutPixel(left, y, (u32)COLOURS::RED);
+		//	PutPixel(right, y, (u32)COLOURS::RED);
+		//}
 	}
 }
 
@@ -988,23 +1077,23 @@ inline void render(HWND hwnd) {
 int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine, int CmdShow) {
 
 
-	Model model("Mutsuki.obj");
+	Model model("diablo3.obj");
 	//Model model2b("2B.obj");
 
 	Object object;
 	object.model = &model;
 
 	std::vector<Vector4> tcache(object.model->verts.size(), 0);
-
+	std::vector<u32> cacheFrame(object.model->verts.size(), 0);
 	object.transformCache = tcache;
-	
+	object.cacheFrame = cacheFrame;
 
 	Object object2;
 	//object2.model = &model2b;
 
 	Transform transform;
-	transform.position = { 0,-1,3,1 };
-	transform.scale = {1,1,1,1 };
+	transform.position = { 0,0,0,1 };
+	transform.scale = {1.f};
 	transform.rotation = { 0,0,0,0 };	
 	object.transform = transform;
 
@@ -1126,13 +1215,16 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 			TranslateMessage(&msg);
 			DispatchMessageW(&msg);
 		}
+
 		// rotate object around
-		//cub[0].transform.rotation.y += 0.01;
-	
+		//cub[0].transform.rotation.x += 0.1;
 		//cub[0].transform.rotation.z += 0.01;
-		ClearFrameData();
-		//RenderModels(objects);
-		RenderModels(cub);
+
+		objects[0].frameCount++;
+		//std::fill(objects[0].cacheValid.begin(), objects[0].cacheValid.end(), 0);
+		ClearFrameData(0x0);
+		RenderModels(objects);
+		//RenderModels(cub);
 		render(hwnd);
 
 		
@@ -1146,6 +1238,9 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 
 		*/
 
+
+
+
 		// perf
 		LARGE_INTEGER endCounter;
 		QueryPerformanceCounter(&endCounter);
@@ -1156,12 +1251,12 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 
 		double frameTime = ((double)(endCounter.QuadPart - lastCounter.QuadPart) / (double)frequency.QuadPart);
 		float FPS = 1.0f / frameTime;
-		char buffer[256];
+		char buf[256];
 
 
 
-		sprintf_s(buffer, 256, "FPS : %.3f  \n Mega Cycles taken for this frame: %d \n ", FPS, totalCycles / (1000 * 1000));
-		OutputDebugStringA(buffer);
+		sprintf_s(buf, 256, "FPS : %.3f  \n Mega Cycles taken for this frame: %d \n ", FPS, totalCycles / (1000 * 1000));
+		OutputDebugStringA(buf);
 
 		lastCycleCount = endCycleCount;
 		lastCounter = endCounter;
