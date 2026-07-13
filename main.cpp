@@ -1,7 +1,7 @@
-//+X = right
+﻿//+X = right
 //+ Y = up
 //- Z = forward
-
+#define STB_IMAGE_IMPLEMENTATION
 #define NOMINMAX // GO AWAY WINDOWS
 #define _CRT_SECURE_NO_WARNINGS
 #define WIN32_LEAN_AND_MEAN
@@ -11,6 +11,8 @@
 #include <Windows.h>
 #include <cstdint>
 #include <iostream>
+#include "stb_image.h"
+
 
 
 using u8 = uint8_t;
@@ -50,7 +52,7 @@ struct WindowData {
 	RECT windowRect;
 	WindowSize windowSize;
 
-	
+
 	WindowData(HWND _hwnd) {
 		hwnd = _hwnd;
 		deviceContext = GetDC(hwnd);
@@ -104,14 +106,224 @@ inline void render(HWND hwnd);
 void DrawTriangle(Triangle t);
 
 
+struct Vertex {
+	Vector4 pos; // w = 1
+	Vector2 uv; // w = 0
+	Vector4 normal;
+	Vector4 colour;
+};
+
+#include <filesystem>
+#include <ostream>
+#include <fstream>
+#include <charconv>
+#include <iostream>
+#include <string_view>
+
+
+std::vector<float> parse_floats_from_line(std::string_view line) {
+	std::vector<float> vals;
+
+	while (!line.empty()) {
+		while (!line.empty() &&
+			(std::isspace(static_cast<unsigned char>(line.front())) ||
+				std::isalpha(static_cast<unsigned char>(line.front())) ||
+				(std::ispunct(static_cast<unsigned char>(line.front())) && line.front() != '-')))
+		{
+			line.remove_prefix(1);
+		}
+
+		if (line.empty()) {
+			break;
+		}
+
+		float value;
+		auto [ptr, errorcode] = std::from_chars(line.data(), line.data() + line.size(), value);
+
+		if ((errorcode != std::errc())) {
+			// TODO - HANDLE
+			break;
+		}
+		vals.push_back(value);
+
+		// advance the ptr past what we just parsed
+		line.remove_prefix(ptr - line.data());
+	}
+	return vals;
+}
+std::vector<float> parse_ints_from_line(std::string_view line) {
+	std::vector<float> vals;
+
+	while (!line.empty()) {
+		while (!line.empty() &&
+			(std::isspace(static_cast<unsigned char>(line.front())) ||
+				std::isalpha(static_cast<unsigned char>(line.front())) ||
+				(std::ispunct(static_cast<unsigned char>(line.front())) && line.front() != '-')))
+		{
+			line.remove_prefix(1);
+		}
+
+		if (line.empty()) {
+			break;
+		}
+
+		int value;
+		auto [ptr, errorcode] = std::from_chars(line.data(), line.data() + line.size(), value);
+
+		if ((errorcode != std::errc())) {
+			// TODO - HANDLE
+			break;
+		}
+		vals.push_back(value);
+
+		// advance the ptr past what we just parsed
+		line.remove_prefix(ptr - line.data());
+	}
+	return vals;
+}
+struct Texture {
+	int width;
+	int height;
+	u32* data;
+};
 
 struct Model {
 	std::vector<Vector3> verts;
 	std::vector<Face> faces;
 
+	std::vector<Vertex> vertices;
+	std::vector<u32> indexBuffer;
+
+
+	std::vector<Vector4> positions;
+	std::vector<Vector3> normals;
+	std::vector<Vector2> uvs;
+
+	Texture texture;
+
+	Model() {};
 
 	Model(std::vector<Vector3> verts, std::vector<Face> faces) : verts(verts), faces(faces) {};
+	explicit Model(std::filesystem::path path) {
+		ReadObj(path);
+	}
+	void ReadObj(const std::filesystem::path& path) {
+		int index = 1;
+		//check if regular file
+		bool isRegular = std::filesystem::is_regular_file(path);
+		if (!isRegular) {
+			// TODO - handle
+		}
 
+		std::ifstream file(path);
+
+		// check if open
+		if (!file.is_open()) {
+			// TODO - handle
+		}
+
+		
+		
+		std::string line;
+		while (std::getline(file, line)) {
+
+
+
+			if (line.starts_with("#")) {
+				continue;
+			}
+			if (line.empty()) {
+				continue;
+			}
+			if (line.starts_with("v ")) {
+				std::vector<float> vals = parse_floats_from_line(line);
+				if (vals.size() < 3) {
+					continue;
+				}
+				Vector4 pos = { vals[0],vals[1],vals[2],1 };
+				positions.push_back(pos);
+			}
+			else if (line.starts_with("vt ")) {
+				std::vector<float> vals = parse_floats_from_line(line);
+				Vector2 pos = { vals[0],vals[1] };
+				uvs.push_back(pos);
+			}
+			else if (line.starts_with("vn ")) {
+				std::vector<float> vals = parse_floats_from_line(line);
+				Vector3 pos = { vals[0],vals[1],vals[2] };
+				normals.push_back(pos);
+			}
+			else if (line.starts_with("f ")) {
+				// ok i take 9 values. each set of 3 represents the info for that corner. pos/uv/norm
+				//Construct Vertex.
+				//Push it into vertices.
+				//Push vertices.size() - 1 into indexBuffer.
+
+
+				std::vector<float> i = parse_ints_from_line(line);
+
+				if (i.size() == 9) {
+					// tri
+
+				// parse corner a
+					auto cornerAPositionIdx = i[0] - 1;
+					auto cornerAUVIdx = i[1] - 1;
+					auto cornerANormalIdx = i[2] - 1;
+		
+					Vertex vertex;
+					vertex.pos = positions[cornerAPositionIdx];
+					vertex.uv = uvs[cornerAUVIdx];
+					vertex.normal = normals[cornerANormalIdx];
+
+					vertices.push_back(vertex);
+					indexBuffer.push_back(vertices.size() - 1);
+					
+					// parse corner b
+					auto cornerBPositionIdx = i[3] - 1;
+					auto cornerBUVIdx = i[4] - 1;
+					auto cornerBNormalIdx = i[5] - 1;
+
+					Vertex vertexB;
+					vertexB.pos = positions[cornerBPositionIdx];
+					vertexB.uv = uvs[cornerBUVIdx];
+					vertexB.normal = normals[cornerBNormalIdx];
+
+					vertices.push_back(vertexB);
+					indexBuffer.push_back(vertices.size() - 1);
+					// parse corner c
+					auto cornerCPositionIdx = i[6] - 1;
+					auto cornerCUVIdx = i[7] - 1;
+					auto cornerCNormalIdx = i[8] - 1;
+
+
+
+
+					Vertex vertexC;
+					vertexC.pos = positions[cornerCPositionIdx];
+					vertexC.uv = uvs[cornerCUVIdx];
+					vertexC.normal = normals[cornerCNormalIdx];
+					vertices.push_back(vertexC);
+					indexBuffer.push_back(vertices.size() - 1);
+
+				}
+			}
+		}
+
+		/*
+		for (int i = 0; i < indices.size(); i += 3)
+			{
+				uint32_t a = indices[i];
+				uint32_t b = indices[i + 1];
+				uint32_t c = indices[i + 2];
+
+				vec3 A = positions[a];
+				vec3 B = positions[b];
+				vec3 C = positions[c];
+			}
+		*/
+
+
+	}
 	Model(const std::string& filename) {
 
 		//loads whole file into in memory storage then parses
@@ -133,6 +345,7 @@ struct Model {
 		char* cur = buf;
 		// parse line by line
 		while (*cur != '\0') {
+
 			char* lineStart = cur;
 
 			while (*cur != '\n' && *cur != '\0') {
@@ -256,7 +469,7 @@ void ClearFrameData(u32 color) {
 //	//std::fill(db, db + buffer.width * buffer.height, FLT_MAX);
 //	FramebufferRenderColour(0x00000000);
 //}
-	
+
 
 
 
@@ -537,7 +750,7 @@ void ScanlineRasterize(Vector2 screen0, Vector2 screen1, Vector2 screen2) {
 
 		if (xL > xR) std::swap(xL, xR);
 
-		for (int x = (int)ceilf(xL); x < (int)ceilf(xR)-1; x++) {
+		for (int x = (int)ceilf(xL); x < (int)ceilf(xR) - 1; x++) {
 			PutPixel(x, y, (u32)COLOURS::SKIN);
 		}
 	}
@@ -552,7 +765,7 @@ void ScanlineRasterize(Vector2 screen0, Vector2 screen1, Vector2 screen2) {
 
 		if (xL > xR) std::swap(xL, xR);
 
-		for (int x = (int)ceilf(xL); x < (int)ceilf(xR) -1; x++) {
+		for (int x = (int)ceilf(xL); x < (int)ceilf(xR) - 1; x++) {
 			PutPixel(x, y, (u32)COLOURS::SKIN);
 		}
 	}
@@ -656,13 +869,106 @@ Colour colours[3] = { {0xFF,0x00,0x00},{0x00,0xFF,0x00},{0x00,0x00,0xFF} };
 
 static float oldcrossAB;
 int tick = 0;
-void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2, float depth[3]) {
 
-	Triangle tri = { v0,v1,v2 };
+#include <expected>
+
+ std::expected<std::vector<std::byte>,bool> LoadBMP(std::filesystem::path& path) {
+	// load entire file into memory
+	if (!std::filesystem::is_regular_file(path)) {
+		return std::unexpected(false);
+	}
+	// open final in binary mode, seek to end instantly 2 get size
+	std::ifstream file(path, std::ios::binary | std::ios::ate);
+	if (!file.is_open()) {
+		// handle
+		return std::unexpected(false);
+	}
+	std::streamsize fileSize = file.tellg();
+	if (fileSize < 0) {
+		return std::unexpected(false);
+	}
+	file.seekg(0, std::ios::beg);
+	
+	std::vector<std::byte> bytes;
+	bytes.resize(fileSize);
+	
+	if (!file.read((char*) bytes.data(), fileSize)) {
+		// return failed
+		return std::unexpected(false);
+	}
+
+
+
+
+
+	return bytes;
+
+
+
+
+	
+}
+
+struct FileObject {
+	// user must free data
+	char* data;
+	size_t size;
+	void Free() {
+		delete[] data;
+	}
+};
+bool ReadFile(const std::filesystem::path& path, FileObject& fileObj) {
+	// load entire file into memory
+	if (!std::filesystem::is_regular_file(path)) {
+		__debugbreak();
+		return false;
+	}
+	// open final in binary mode, seek to end instantly
+	std::ifstream file(path, std::ios::binary | std::ios::ate);
+	// return to start
+	if (!file.is_open()) {
+		// handle
+		return false;
+	}
+	std::streamsize fileSize = file.tellg();
+	if (fileSize < 0) {
+		return false;
+	}
+	file.seekg(0, std::ios::beg);
+	char* output = new char[fileSize];
+	if (!file.read(output, fileSize)) {
+		// return failed
+		delete[] output;
+		return false;
+	}
+	fileObj.data = output;
+	fileObj.size = fileSize;
+	return true;
+}
+struct RenderVertex {
+	Vector2 pos;
+	Vector2 uv;
+	float depth;
+	float invW;
+};
+u32 SampleTexture(float u, float v, Texture& texture) {
+	u = std::clamp(u, 0.0f, 1.0f);
+	v = std::clamp(v, 0.0f, 1.0f);
+	int x = int(u * (texture.width - 1));
+	int y = int(v * (texture.height - 1));
+	return texture.data[y * texture.width + x];
+}
+void EdgeFunctionRasterize(RenderVertex& v0, RenderVertex& v1, RenderVertex& v2, Texture& texture) {
+
+	
+	Vector2 v0pos = v0.pos;
+	Vector2 v1pos = v1.pos;
+	Vector2 v2pos = v2.pos;
+	Triangle tri = { v0pos,v1pos,v2pos };
 
 	// compute bounding box
-	auto [trixmin, trixmax] = std::minmax({ v0.x,v1.x,v2.x });
-	auto [triymin, triymax] = std::minmax({ v0.y,v1.y,v2.y });
+	auto [trixmin, trixmax] = std::minmax({ v0pos.x,v1pos.x,v2pos.x });
+	auto [triymin, triymax] = std::minmax({ v0pos.y,v1pos.y,v2pos.y });
 
 	// inital rejection if off screen.. i think it has been culled by here anyway..
 	if (trixmax < 0 || trixmin >= buffer.width ||
@@ -670,14 +976,14 @@ void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2, float depth[3]) {
 	{
 		return;
 	}
-	
+
 	// clamp to screen dimensions
 	auto xmin = std::clamp((int)floor(trixmin), 0, buffer.width - 1);
 	auto xmax = std::clamp((int)ceil(trixmax), 0, buffer.width - 1);
 	auto ymin = std::clamp((int)floor(triymin), 0, buffer.height - 1);
 	auto ymax = std::clamp((int)ceil(triymax), 0, buffer.height - 1);
-		
-	
+
+
 
 	// 2D cross of a tri = 2xSignedArea of tri, so it can tell you about the triangle
 	// > 0, its a CCW tri, == 0 its a degen tri, < 0 its CW
@@ -687,20 +993,20 @@ void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2, float depth[3]) {
 	if (IsNearlyZero(area)) {
 		return;
 	}
-
+	
 	// normalise winding to force CCW
 	if (area < 0.0f) {
-		std::swap(tri.v1, tri.v2);
-		std::swap(depth[1], depth[2]);
+		std::swap(v1,v2);
 		area = Cross2D(tri.v1 - tri.v0, tri.v2 - tri.v0); //recompute area
 	}
+	tri = { v0.pos,v1.pos,v2.pos };
 
 	// a - > b (b-a)
-	Vector2 abEdge = tri.v1 - tri.v0; 
+	Vector2 abEdge = tri.v1 - tri.v0;
 	// b - > c(c- b)
-	Vector2 bcEdge = tri.v2 - tri.v1; 
+	Vector2 bcEdge = tri.v2 - tri.v1;
 	// c - > a (a - c)
-	Vector2 caEdge = tri.v0 - tri.v2; 
+	Vector2 caEdge = tri.v0 - tri.v2;
 
 
 	// w0 = bcEdge
@@ -733,8 +1039,8 @@ void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2, float depth[3]) {
 		float crossCA = caCrossRow0;
 
 		for (int x = xmin; x <= xmax; x++) {
-			
-			
+
+
 
 			// go to pixel centre
 			//Vector2 p{ (float)x + 0.5f, (float)y + 0.5f };
@@ -748,7 +1054,7 @@ void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2, float depth[3]) {
 			//float crossBC = Cross2D(bcEdge, bcToP);
 			//float crossCA = Cross2D(caEdge, caToP);
 
-		
+
 
 			if (EdgeCheck(crossAB, abFlag) &&
 				EdgeCheck(crossBC, bcFlag) &&
@@ -756,19 +1062,19 @@ void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2, float depth[3]) {
 			{
 				//barycentrics 
 
-				float alpha = crossBC* invArea;
-				float beta =  crossCA* invArea;
-				float gamma = crossAB* invArea;
+				float alpha = crossBC * invArea;
+				float beta = crossCA * invArea;
+				float gamma = crossAB * invArea;
 
-				
+
 
 				float* d = (float*)buffer.depth;
 				float oldDepth = d[y * buffer.width + x];
 
-				
-				float newDepth = alpha * depth[0] + beta * depth[1] + gamma * depth[2]; // interpolate depth using barycentrics
 
-				if (!(newDepth < oldDepth)) {
+				float newDepth = alpha * v0.depth + beta * v1.depth + gamma * v2.depth; // interpolate depth using barycentrics
+
+				if ((newDepth >= oldDepth)) {
 					continue;
 				}
 
@@ -776,18 +1082,56 @@ void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2, float depth[3]) {
 
 
 
-				u8 a = 0xFF;
-				u8 r = alpha * colours[0].r + beta * colours[1].r + gamma * colours[2].r;
-				u8 g = alpha * colours[0].g + beta * colours[1].g + gamma * colours[2].g;
-				u8 b = alpha * colours[0].b + beta * colours[1].b + gamma * colours[2].b;
+
+
+				//u8 a = 0xFF;
+				//u8 r = alpha * colours[0].r + beta * colours[1].r + gamma * colours[2].r;
+				//u8 g = alpha * colours[0].g + beta * colours[1].g + gamma * colours[2].g;
+				//u8 b = alpha * colours[0].b + beta * colours[1].b + gamma * colours[2].b;
+
+
+
+
+
+				// old
+				//float u = alpha * v0.uv.u + beta * v1.uv.u + gamma * v2.uv.u;
+				//float v = alpha * v0.uv.v + beta * v1.uv.v + gamma * v2.uv.v;
+
+				// perspective correct
+				float denominator = (alpha * v0.invW) + (beta * v1.invW) + (gamma * v2.invW);
+				float u = ((alpha * v0.uv.u * v0.invW) + (beta * v1.uv.u * v1.invW) + (gamma * v2.uv.u * v2.invW)) / denominator;
+				float v = ((alpha * v0.uv.v * v0.invW) + (beta * v1.uv.v * v1.invW) + (gamma * v2.uv.v * v2.invW)) / denominator;
+		
+
+
+				u32 rgba = SampleTexture(u, v, texture);
+
+				uint8_t r = rgba & 0xFF;
+				uint8_t g = (rgba >> 8) & 0xFF;
+				uint8_t b = (rgba >> 16) & 0xFF;
+				uint8_t a = (rgba >> 24) & 0xFF;
+
+				uint32_t bgra =
+					(a << 24) |
+					(r << 16) |  // goes into byte 2
+					(g << 8) |
+					b;           // goes into byte 0
+
+				
+
+
+
+				//float u = alpha * uvA.u + beta * uvB.u + gamma * uvC.u;
+				//float v = alpha * uvA.v + beta * uvB.v + gamma * uvC.v;
+
 
 				u32 colour = 0x00000000;
-				colour = (colour | a) << 8;
-				colour = (colour | b) << 8;
+				//colour = (colour | a) << 8;
+				colour = (colour | r) << 8;
 				colour = (colour | g) << 8;
-				colour = (colour | r);
+				colour = (colour | b);
 
-				PutPixel(x, y, colour);
+				PutPixel(x, y, bgra);
 			}
 			// acculumuate across the x
 			crossAB += deltaAbCol;
@@ -796,81 +1140,124 @@ void EdgeFunctionRasterize(Vector2 v0, Vector2 v1, Vector2 v2, float depth[3]) {
 		}
 		// acculumuate across the y
 		abCrossRow0 += deltaAbRow;
-		bcCrossRow0	+= deltaBcRow;
-		caCrossRow0	+= deltaCaRow;
+		bcCrossRow0 += deltaBcRow;
+		caCrossRow0 += deltaCaRow;
 	}
 }
 volatile int hits = 0;
 volatile int misses = 0;
 
 
-// Sutherland�Hodgman polygon clippppper
-Vector4 IntersectNear(Vector4 a, Vector4 b) {
-	float t = (-NEAR_PLANE - a.z) / (b.z - a.z);
+// Sutherland–Hodgman polygon clippppper
+Vertex IntersectNear(Vertex a, Vertex b) {
+	float t = (-NEAR_PLANE - a.pos.z) / (b.pos.z - a.pos.z);
+
+	// clip pos
 	Vector4 r;
-	r.x = Lerp(a.x, b.x, t);
-	r.y = Lerp(a.y, b.y, t);
-	r.z = Lerp(a.z, b.z, t);
-	return r;
+	r.x = Lerp(a.pos.x, b.pos.x, t);
+	r.y = Lerp(a.pos.y, b.pos.y, t);
+	r.z = Lerp(a.pos.z, b.pos.z, t);
+
+	// clip uv
+	Vector2 uv;
+	uv.u = Lerp(a.uv.u, b.uv.u, t);
+	uv.v = Lerp(a.uv.v, b.uv.v, t);
+
+	Vector4 norm;
+	norm.x = Lerp(a.normal.x, b.normal.x, t);
+	norm.y = Lerp(a.normal.y, b.normal.y, t);
+	norm.z = Lerp(a.normal.z, b.normal.z, t);
+
+	Vertex ret;
+	ret.colour = a.colour;
+	ret.normal = norm;
+	ret.pos = r;
+	ret.uv = uv;
+	return ret;
 }
 bool InsideNear(Vector4 v) {
 	return v.z <= -NEAR_PLANE;
 }
-std::vector<Vector4> ClipAgainstNear(const std::vector<Vector4>& input) {
+std::vector<Vertex> ClipAgainstNear(const std::vector<Vertex>& input) {
 
-	std::vector<Vector4> out;
+	std::vector<Vertex> out;
 	for (int i = 0; i < input.size(); ++i) {
-		Vector4 cur = input[i];
-		Vector4 prev = input[(i + input.size() - 1) % input.size()];
+		Vertex a = input[i];
+		Vertex b = input[(i + input.size() - 1) % input.size()];
+
+		Vector4 cur = a.pos;
+		Vector4 prev = b.pos;
 
 		bool currInside = InsideNear(cur);
 		bool prevInside = InsideNear(prev);
 
 		// case 1 - both inside
 		if (currInside && prevInside) {
-			out.push_back(cur);
+			out.push_back(a);
 		}
 		// case 2  inside->outside - keep the edge up to the plane(intersection)
 		else if (prevInside && !currInside) {
-			out.push_back(IntersectNear(prev, cur));
+			out.push_back(IntersectNear(b, a));
 		}
 		// case 3 outside -> inside
-		
+
 		else if (!prevInside && currInside) {
-			out.push_back(IntersectNear(prev, cur));
-			out.push_back(cur);
+			out.push_back(IntersectNear(b, a));
+			out.push_back(a);
 		}
 		// case 4 - both outside, return insertsect of prev and current unchanged
 	}
 	return out;
 
 }
+
 // sep function so clipping that produces a new tri works
-void HandleViewSpaceTriangle(const Vector4& v0view,
-	const Vector4& v1view,
-	const Vector4& v2view) {
 
-	auto v0clip = p * v0view;
-	auto v1clip = p * v1view;
-	auto v2clip = p * v2view;
+void HandleViewSpaceTriangle(const Vertex& v0view,
+	const Vertex& v1view,
+	const Vertex& v2view, Texture& texture) {
 
-	v0clip /= v0clip.w;
-	v1clip /= v1clip.w;
-	v2clip /= v2clip.w;
+	auto v0clip = p * v0view.pos;
+	auto v1clip = p * v1view.pos;
+	auto v2clip = p * v2view.pos;
+
+	float w0 = v0clip.w;
+	float w1 = v1clip.w;
+	float w2 = v2clip.w;
+
+	v0clip /= w0;
+	v1clip /= w1;
+	v2clip /= w2;
+
 
 	auto screen0 = NDCToScreen(v0clip);
 	auto screen1 = NDCToScreen(v1clip);
 	auto screen2 = NDCToScreen(v2clip);
-	//depth buffer is [-1,1]. smaller the z the closer the camera
+
+
+	// Prepare RenderVerts - TODO - Stop so much copying..
+	RenderVertex rv0, rv1, rv2;
+	rv0.pos = screen0;
+	rv0.uv = v0view.uv;
+	rv0.depth = v0clip.z;
+	rv0.invW = 1.0f / w0;
+
+	rv1.pos = screen1;
+	rv1.uv = v1view.uv;
+	rv1.depth = v1clip.z;
+	rv1.invW = 1.0f / w1;
+
+	rv2.pos = screen2;
+	rv2.uv = v2view.uv;
+	rv2.depth = v2clip.z;
+	rv2.invW = 1.0f / w2;
+	
 
 	//if (v0clip.z < -1 || v0clip.z > 1 || v1clip.z < -1 || v1clip.z > 1 || v2clip.z < -1 || v2clip.z > 1) {
 	//	return;
 	//}
 
-	float d[3];
-	d[0] = -v0view.z; d[1] = -v1view.z; d[2] = -v2view.z;
-	//ScanlineRasterize(screen0, screen1, screen2);
-	EdgeFunctionRasterize(screen0, screen1, screen2, d);
+	EdgeFunctionRasterize(rv0,rv1,rv2, texture);
 }
 void RenderModels(std::vector<Object>& models) {
 	//models[0].transformCache.assign(models[0].model->verts.size(), Vector4{ 0,0,0,0 }); // TODO -temp fix, 
@@ -882,65 +1269,79 @@ void RenderModels(std::vector<Object>& models) {
 		//Matrix4D MVP = p * v * model; // 
 		Matrix4D MV = v * model;
 
-		float xmin= FLT_MAX;
-		float ymin= FLT_MAX;
-		float xmax= -FLT_MAX;
-		float ymax= -FLT_MAX;
+		float xmin = FLT_MAX;
+		float ymin = FLT_MAX;
+		float xmax = -FLT_MAX;
+		float ymax = -FLT_MAX;
 
-		for (const auto& face : faces) {
+		for (int i = 0; i < m.model->indexBuffer.size(); i += 3) {
 
-			Vector4 v0{ m.model->verts[face.a],1 }; // THESE ARE IN LOCAL SPACE
-			Vector4 v1{ m.model->verts[face.b],1 };
-			Vector4 v2{ m.model->verts[face.c],1 };
+			//Vector4 v0{ m.model->verts[face.a],1 }; // THESE ARE IN LOCAL SPACE
+			//Vector4 v1{ m.model->verts[face.b],1 };
+			//Vector4 v2{ m.model->verts[face.c],1 };
+
+			u32 idx0 = m.model->indexBuffer[i];
+			u32 idx1 = m.model->indexBuffer[i + 1];
+			u32 idx2 = m.model->indexBuffer[i + 2];
+
+			auto vertex0 = m.model->vertices[idx0];
+			auto vertex1 = m.model->vertices[idx1];
+			auto vertex2 = m.model->vertices[idx2];
 
 
+
+			Vector4 v0pos = vertex0.pos;
+			Vector4 v1pos = vertex1.pos;
+			Vector4 v2pos = vertex2.pos;
+
+			
 
 			Vector4 v0view;
 			Vector4 v1view;
 			Vector4 v2view;
-			//v0view = MV * v0;
-			//v1view = MV * v1;
-			//v2view = MV * v2;
+			v0view = MV * v0pos;
+			v1view = MV * v1pos;
+			v2view = MV * v2pos;
 
 
 			// transform caching
-			if (m.cacheFrame[face.a] == m.frameCount) {
-				v0view = m.transformCache[face.a];
+			/*if (m.cacheFrame[idx0] == m.frameCount) {
+				v0view = m.transformCache[idx0];
 				hits++;
 			}
 			else {
 				v0view = MV * v0;
-				m.transformCache[face.a] = v0view;
-				m.cacheFrame[face.a] = m.frameCount;
+				m.transformCache[idx0] = v0view;
+				m.cacheFrame[idx0] = m.frameCount;
 				misses++;
 			}
-			if (m.cacheFrame[face.b] == m.frameCount) {
-				v1view = m.transformCache[face.b];
+			if (m.cacheFrame[idx1] == m.frameCount) {
+				v1view = m.transformCache[idx1];
 				hits++;
 			}
 			else {
 				v1view = MV * v1;
-				m.transformCache[face.b] = v1view;
-				m.cacheFrame[face.b] = m.frameCount;
+				m.transformCache[idx1] = v1view;
+				m.cacheFrame[idx1] = m.frameCount;
 				misses++;
 			}
-			if (m.cacheFrame[face.c] == m.frameCount) {
-				v2view = m.transformCache[face.c];
+			if (m.cacheFrame[idx2] == m.frameCount) {
+				v2view = m.transformCache[idx2];
 				hits++;
 			}
 			else {
 				v2view = MV * v2;
-				m.transformCache[face.c] = v2view;
-				m.cacheFrame[face.c] = m.frameCount;
+				m.transformCache[idx2] = v2view;
+				m.cacheFrame[idx2] = m.frameCount;
 				misses++;
-			}
+			}*/
 
 			volatile int sink = hits;
 			sink = misses;
 			// backface culling
 
 
-			
+
 			// calculate surface normal
 			Vector4 edge1 = (v1view - v0view);
 			Vector4 edge2 = (v2view - v0view);
@@ -969,8 +1370,10 @@ void RenderModels(std::vector<Object>& models) {
 
 			// NEAR PLANE CLIPPER
 
-
-			std::vector<Vector4> clipped = ClipAgainstNear({ v0view,v1view,v2view });
+			vertex0.pos = v0view;
+			vertex1.pos = v1view;
+			vertex2.pos = v2view;
+			std::vector<Vertex> clipped = ClipAgainstNear({ vertex0,vertex1,vertex2 });
 
 			// < 3 because 2 verts cant form a tri, 3 and 4 can..
 			if (clipped.size() < 3) {
@@ -978,21 +1381,23 @@ void RenderModels(std::vector<Object>& models) {
 			}
 
 
+		
+
 			for (int i = 1; i + 1 < clipped.size(); ++i) {
-				HandleViewSpaceTriangle(clipped[0], clipped[i], clipped[i + 1]);
+				vertex0 = clipped[0];
+				vertex1 = clipped[i];
+				vertex2 = clipped[i + 1];;
+				HandleViewSpaceTriangle(vertex0,vertex1,vertex2,m.model->texture);
 			}
 
 			//TODO - MAKE BETTER CLIPPING. this is crude. BVH
-		
+			//xmin = std::min({ xmin, screen0.x, screen1.x, screen2.x });
+			//xmax = std::max({ xmax, screen0.x, screen1.x, screen2.x });
 
-		
-				//xmin = std::min({ xmin, screen0.x, screen1.x, screen2.x });
-				//xmax = std::max({ xmax, screen0.x, screen1.x, screen2.x });
-
-				//ymin = std::min({ ymin, screen0.y, screen1.y, screen2.y });
-				//ymax = std::max({ ymax, screen0.y, screen1.y, screen2.y });
+			//ymin = std::min({ ymin, screen0.y, screen1.y, screen2.y });
+			//ymax = std::max({ ymax, screen0.y, screen1.y, screen2.y });
 		}
-		
+
 
 		// debug box - UNSAFE. add buffer.w/h checking
 		//int left = (int)floorf(xmin);
@@ -1018,7 +1423,6 @@ void RenderModels(std::vector<Object>& models) {
 
 
 void DrawTriangle(Triangle t) {
-
 	if (t.v0.x == INFINITY || t.v1.x == INFINITY || t.v2.x == INFINITY) {
 		return;
 	}
@@ -1051,7 +1455,6 @@ void PutPixel(i32 x, i32 y, u32 color)
 		//OutputDebugStringA("OUT OF BOUNDS");
 		return;
 	}
-
 	u32* pixels = (u32*)buffer.memory;
 	pixels[y * buffer.width + x] = color;
 }
@@ -1064,8 +1467,6 @@ inline void render(HWND hwnd) {
 		ResizeBitmap(buffer, frameWinData.windowSize.windowWidth, frameWinData.windowSize.windowHeight);
 		centreScreenX = frameWinData.windowSize.windowWidth / 2;
 		centreScreenY = frameWinData.windowSize.windowHeight / 2;
-
-
 	}
 	DisplayBitmapInWindow(frameWinData, buffer);
 }
@@ -1073,47 +1474,43 @@ inline void render(HWND hwnd) {
 
 
 
-#include <span>
+
 int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine, int CmdShow) {
 
+	AllocConsole();
+	freopen_s((FILE**)stdout, "CONOUT$", "w", stdout);
 
-	Model model("diablo3.obj");
-	//Model model2b("2B.obj");
 
+	int x, y, n;
+	unsigned char* tex = stbi_load("white.jpg", &x, &y, &n, 4);
+	Texture texture{ x,y,reinterpret_cast<u32*>(tex)};
+
+	std::filesystem::path path("diablo3.obj");
+	Model model(path);
+	model.texture = texture;
+	
 	Object object;
 	object.model = &model;
-
-	std::vector<Vector4> tcache(object.model->verts.size(), 0);
-	std::vector<u32> cacheFrame(object.model->verts.size(), 0);
+	
+	std::vector<Vector4> tcache(object.model->vertices.size(), 0);
+	std::vector<u32> cacheFrame(object.model->vertices.size(), 0);
 	object.transformCache = tcache;
 	object.cacheFrame = cacheFrame;
 
-	Object object2;
-	//object2.model = &model2b;
 
 	Transform transform;
 	transform.position = { 0,0,0,1 };
-	transform.scale = {1.f};
-	transform.rotation = { 0,0,0,0 };	
+	transform.scale = { 1.f };
+	transform.rotation = { 0,0,0,0 };
 	object.transform = transform;
-
-	//Transform transform2;
-	//transform2.position = { 1,0,0,1 };
-	//object2.transform = transform2;
 
 	std::vector<Object> objects;
 	objects.push_back(object);
 
-	//objects.push_back(object2);
-
-	//Model model1("diablo3.obj");
-	//static u32 winwidth = 2560;
-	//static u32 winheight = 1440;
 
 
 	camera.position = Vector4{ 0, 0, 5, 1 };
 	camera.rotation = Vector4{ 0, 0, 0, 0 };
-
 	v = MakeViewMatrix();
 	p = MakePerspective(30);
 
@@ -1140,6 +1537,116 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 	WindowData winData(hwnd);
 	ResizeBitmap(buffer, winwidth, winheight);
 
+	Model cube;
+
+	cube.positions = {
+		{-1, -1, -1, 1}, // 0
+		{ 1, -1, -1, 1}, // 1
+		{ 1,  1, -1, 1}, // 2
+		{-1,  1, -1, 1}, // 3
+		{-1, -1,  1, 1}, // 4
+		{ 1, -1,  1, 1}, // 5
+		{ 1,  1,  1, 1}, // 6
+		{-1,  1,  1, 1}, // 7
+	};
+
+	cube.uvs = {
+		{0,0},
+		{1,0},
+		{1,1},
+		{0,1}
+	};
+
+	cube.normals = {
+		{ 0,  0,  1}, // front
+		{ 0,  0, -1}, // back
+		{-1,  0,  0}, // left
+		{ 1,  0,  0}, // right
+		{ 0,  1,  0}, // top
+		{ 0, -1,  0}  // bottom
+	};
+
+
+	// Helper lambda to create vertices exactly like ReadObj()
+	auto addVertex = [&](int pos, int uv, int normal)
+		{
+			Vertex v;
+			v.pos = cube.positions[pos];
+			v.uv = cube.uvs[uv];
+			v.normal = cube.normals[normal];
+
+			cube.vertices.push_back(v);
+			cube.indexBuffer.push_back((u32)cube.vertices.size() - 1);
+		};
+
+
+	// Front (+Z)
+	addVertex(4, 0, 0);
+	addVertex(5, 1, 0);
+	addVertex(6, 2, 0);
+
+	addVertex(4, 0, 0);
+	addVertex(6, 2, 0);
+	addVertex(7, 3, 0);
+
+
+	// Back (-Z)
+	addVertex(1, 0, 1);
+	addVertex(0, 1, 1);
+	addVertex(3, 2, 1);
+
+	addVertex(1, 0, 1);
+	addVertex(3, 2, 1);
+	addVertex(2, 3, 1);
+
+
+	// Left (-X)
+	addVertex(0, 0, 2);
+	addVertex(4, 1, 2);
+	addVertex(7, 2, 2);
+
+	addVertex(0, 0, 2);
+	addVertex(7, 2, 2);
+	addVertex(3, 3, 2);
+
+
+	// Right (+X)
+	addVertex(5, 0, 3);
+	addVertex(1, 1, 3);
+	addVertex(2, 2, 3);
+
+	addVertex(5, 0, 3);
+	addVertex(2, 2, 3);
+	addVertex(6, 3, 3);
+
+
+	// Top (+Y)
+	addVertex(3, 0, 4);
+	addVertex(7, 1, 4);
+	addVertex(6, 2, 4);
+
+	addVertex(3, 0, 4);
+	addVertex(6, 2, 4);
+	addVertex(2, 3, 4);
+
+
+	// Bottom (-Y)
+	addVertex(0, 0, 5);
+	addVertex(1, 1, 5);
+	addVertex(5, 2, 5);
+
+	addVertex(0, 0, 5);
+	addVertex(5, 2, 5);
+	addVertex(4, 3, 5);
+
+	
+
+	cube.texture = texture;
+	Object cubeObj;
+	cubeObj.model = &cube;
+	transform.position = { 0,0,0,1 };
+	cubeObj.transform = transform;
+	std::vector<Object> cub = { cubeObj };
 
 	i64 lastCycleCount = __rdtsc();
 	LARGE_INTEGER frequency;
@@ -1147,64 +1654,6 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 	LARGE_INTEGER lastCounter;
 	QueryPerformanceCounter(&lastCounter);
 	MSG msg{};
-
-
-
-	Vector2 v0 = { 400,400 };
-	Vector2 v1 = { 800,400 };
-	Vector2 v2 = { 400,800 };
-	Vector2 v3 = { 900,900 };
-	Vector2 v4 = { 750,200 };
-
-	
-	Model cube = {
-		// Vertices
-		{
-			{-1, -1, -1}, // 0
-			{ 1, -1, -1}, // 1
-			{ 1,  1, -1}, // 2
-			{-1,  1, -1}, // 3
-			{-1, -1,  1}, // 4
-			{ 1, -1,  1}, // 5
-			{ 1,  1,  1}, // 6
-			{-1,  1,  1}, // 7
-		},
-
-		// Triangles (CCW winding from outside)
-		{
-			// Front (+Z)
-			{4, 5, 6},
-			{4, 6, 7},
-
-			// Back (-Z)
-			{1, 0, 3},
-			{1, 3, 2},
-
-			// Left (-X)
-			{0, 4, 7},
-			{0, 7, 3},
-
-			// Right (+X)
-			{5, 1, 2},
-			{5, 2, 6},
-
-			// Top (+Y)
-			{3, 7, 6},
-			{3, 6, 2},
-
-			// Bottom (-Y)
-			{0, 1, 5},
-			{0, 5, 4},
-		}
-	};
-	Object cubeObj;
-	cubeObj.model = &cube;
-	transform.position = { 0,0,0,1 };
-	cubeObj.transform = transform;
-	std::vector<Object> cub = { cubeObj };
-
-
-	
 	while (running) {
 		//Timer timer;
 		if (msg.message == WM_QUIT) {
@@ -1217,52 +1666,31 @@ int WINAPI wWinMain(HINSTANCE Instance, HINSTANCE PrevInstance, LPWSTR lpCmdLine
 		}
 
 		// rotate object around
-		//cub[0].transform.rotation.x += 0.1;
+		cub[0].transform.rotation.y += 0.1;
 		//cub[0].transform.rotation.z += 0.01;
 
 		objects[0].frameCount++;
-		//std::fill(objects[0].cacheValid.begin(), objects[0].cacheValid.end(), 0);
 		ClearFrameData(0x0);
-		RenderModels(objects);
-		//RenderModels(cub);
+		RenderModels(cub);
 		render(hwnd);
-
-		
-		
-		/*
-		* 
-			HandleInput(scene.camera)
-			Update(scene.camera)
-			update func maybe just loops through a list of objects to update, switches on camera and handles it..?
-			renderer.render(scene)
-
-		*/
-
-
-
 
 		// perf
 		LARGE_INTEGER endCounter;
 		QueryPerformanceCounter(&endCounter);
-
 		i64 endCycleCount = __rdtsc();
 		i64 totalCycles = endCycleCount - lastCycleCount;
-
-
 		double frameTime = ((double)(endCounter.QuadPart - lastCounter.QuadPart) / (double)frequency.QuadPart);
 		float FPS = 1.0f / frameTime;
 		char buf[256];
-
-
-
 		sprintf_s(buf, 256, "FPS : %.3f  \n Mega Cycles taken for this frame: %d \n ", FPS, totalCycles / (1000 * 1000));
+		//std::cout << "fps : " << FPS << std::endl << "\n Mega Cycles taken for this frame: " << totalCycles / (1000 * 1000);
 		OutputDebugStringA(buf);
-
 		lastCycleCount = endCycleCount;
 		lastCounter = endCounter;
 
-		
 	}
+	stbi_image_free(tex);
+	return 1;
 }
 
 

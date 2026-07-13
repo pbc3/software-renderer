@@ -663,7 +663,12 @@ inline constexpr auto Orthonormalize = GramSchmidt;
 //bool GetInverse(Matrix3D& m, Matrix3D& out_Inverse);
 
 struct Vector2{
-	float x, y;
+
+	union {
+		struct { float x, y; };
+		struct { float u, v;};
+		float data[2];
+	};
 	constexpr Vector2(float x, float y) : x(x), y(y) {};
 	constexpr Vector2(float x) : x(x), y(x) {};
 	constexpr Vector2() : Vector2(0.f) {};
